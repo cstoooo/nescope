@@ -128,6 +128,18 @@ pub(all) struct Ppu {
   nt_ram : FixedArray[Byte]
   /// Palette RAM: 32 bytes, with the sprite entries mirrored down to 16.
   palette : FixedArray[Byte]
+  /// The sprite indices the evaluator picked for the current scanline, in OAM
+  /// order, at most eight.
+  ///
+  /// The hardware evaluates once per line and keeps the result in a small
+  /// secondary memory, which the renderer then reads. Doing the same means the
+  /// per-pixel path touches eight sprites rather than sixty-four, and it is the
+  /// only place the overflow condition can be detected correctly: the condition
+  /// is "a ninth sprite shares this line", which is not a property of any one
+  /// pixel.
+  scanline_sprites : FixedArray[Int32]
+  /// How many entries of `scanline_sprites` are live for this line.
+  mut scanline_count : Int32
   /// Object attribute memory: 64 sprites of 4 bytes each.
   oam : FixedArray[Byte]
   /// The byte most recently read into the PPU's internal read buffer.
@@ -218,6 +230,8 @@ pub fn Ppu::new() -> Ppu {
     nt_ram: FixedArray::make(0x1000, b'\x00'),
     palette: FixedArray::make(32, b'\x00'),
     oam: FixedArray::make(256, b'\x00'),
+    scanline_sprites: FixedArray::make(8, 0),
+    scanline_count: 0,
     read_buffer: 0,
     scanline: 0,
     dot: 0,
@@ -310,6 +324,13 @@ fn Ppu::background_pixel(self : Ppu, x : Int32, _y : Int32) -> BackgroundPixel {
 /// picture ends at line 240.
 pub fn Ppu::tick(self : Ppu) -> Bool {
   if self.scanline < VBLANK_START {
+    // Evaluate at the start of the line as well as at the boundary above. The
+    // boundary alone is enough for a running console, but it means a caller that
+    // sets OAM and then ticks a few dots sees an empty sprite list, which makes
+    // the evaluator's behaviour hard to test and the API hard to use.
+    if self.dot == 0 {
+      self.evaluate_sprites(self.scanline)
+    }
     if self.dot < SCREEN_WIDTH {
       self.render_pixel()
     }
@@ -336,6 +357,12 @@ pub fn Ppu::tick(self : Ppu) -> Bool {
     // pattern is the same on every line, so the line boundary is a faithful
     // stand-in and costs one increment instead of tracking the bus.
     self.scanlines = self.scanlines + 1U
+    // The hardware evaluates which sprites are on the next line during the
+    // previous line's horizontal blank, so the result is ready before the first
+    // pixel is drawn. Selecting here keeps the per-pixel path to eight sprites.
+    if self.scanline < VBLANK_START {
+      self.evaluate_sprites(self.scanline)
+    }
     if self.scanline == VBLANK_START {
       self.status.vblank = true
       started_vblank = true
@@ -620,33 +647,23 @@ fn Ppu::sprite_pixel(self : Ppu, x : Int32, y : Int32) -> SpritePixel? {
     return None
   }
   let height = if self.ctrl.tall_sprites { 16 } else { 8 }
-  let mut drawn = 0
-  for i in 0..<64 {
+  // Only the sprites the evaluator picked for this line are considered. Walking
+  // all sixty-four here would be correct but would cost eight times the work per
+  // pixel, and the evaluator is the only place that can see the overflow
+  // condition in the first place.
+  for slot in 0..<self.scanline_count {
+    let i = self.scanline_sprites[slot]
     let at = i * 4
     let sprite_y = self.oam[at].to_int().reinterpret_as_uint()
     let tile_index = self.oam[at + 1].to_int().reinterpret_as_uint()
     let attributes = self.oam[at + 2].to_int().reinterpret_as_uint()
     let sprite_x = self.oam[at + 3].to_int().reinterpret_as_uint()
-    // OAM stores the sprite's top edge minus one, so $FF means the sprite starts
-    // on scanline 0. The addition wraps inside eight bits rather than going
-    // negative, which is why $FF is the top of the screen rather than above it.
     let top = ((sprite_y + 1U) & 0xFFU).reinterpret_as_int()
-    let row = y - top
-    // A negative difference means the scanline is above the sprite; a distance at
-    // least the sprite's height means it is below.
-    if row < 0 || row >= height {
-      continue
-    }
     if x < sprite_x.reinterpret_as_int() ||
       x >= sprite_x.reinterpret_as_int() + 8 {
       continue
     }
-    drawn = drawn + 1
-    if drawn > 8 {
-      self.status.overflow = true
-      break
-    }
-    let mut row = row
+    let mut row = y - top
     if (attributes & 0x80) != 0 {
       row = height - 1 - row
     }
@@ -658,8 +675,7 @@ fn Ppu::sprite_pixel(self : Ppu, x : Int32, y : Int32) -> SpritePixel? {
     let tile = if self.ctrl.tall_sprites {
       // A tall sprite's index selects a 16-pixel pair: the low bit is forced to
       // zero and the row selects which of the two 8x8 tiles to use.
-      let base = (tile_index & 0xFE) | (row / 8).reinterpret_as_uint()
-      base
+      (tile_index & 0xFE) | (row / 8).reinterpret_as_uint()
     } else {
       tile_index
     }
@@ -676,6 +692,8 @@ fn Ppu::sprite_pixel(self : Ppu, x : Int32, y : Int32) -> SpritePixel? {
   }
   None
 }
+
+///|
 
 ///|
 /// Reads one of the PPU's eight registers.
@@ -882,4 +900,46 @@ fn table_ram_offset(mirroring : Mirroring, address : Int32) -> Int32 {
   let table = folded / 0x400
   let within = folded % 0x400
   table_ram_base(mirroring, table) + within
+}
+
+///|
+/// Evaluates which sprites are visible on the current scanline.
+///
+/// This reproduces the hardware's behaviour rather than an idealised version of
+/// it. Two details matter and both are visible to a program through the status
+/// register:
+///
+/// - The selection looks only at the vertical range. A sprite whose X puts it
+///   entirely off screen still occupies a slot and can still trigger overflow,
+///   which is why a game that hides sprites by moving them right is not free.
+/// - Overflow is set when a ninth sprite is found, and the search then stops. A
+///   program that polls the flag therefore cannot tell whether nine sprites
+///   shared the line or sixty.
+///
+/// The hardware also corrupts its own index after setting the flag, which some
+/// games use as a detection signature. That is not reproduced: it is a bug, this
+/// emulator reports the honest condition, and reproducing it would mean a game
+/// could tell the difference between this and a real console.
+fn Ppu::evaluate_sprites(self : Ppu, y : Int32) -> Unit {
+  self.scanline_count = 0
+  if !self.mask.show_sprites {
+    return
+  }
+  let height = if self.ctrl.tall_sprites { 16 } else { 8 }
+  for i in 0..<64 {
+    let at = i * 4
+    let sprite_y = self.oam[at].to_int().reinterpret_as_uint()
+    // OAM holds the top edge minus one, so $FF puts the sprite on scanline 0.
+    let top = ((sprite_y + 1U) & 0xFFU).reinterpret_as_int()
+    let row = y - top
+    if row < 0 || row >= height {
+      continue
+    }
+    if self.scanline_count >= 8 {
+      self.status.overflow = true
+      return
+    }
+    self.scanline_sprites[self.scanline_count] = i
+    self.scanline_count = self.scanline_count + 1
+  }
 }

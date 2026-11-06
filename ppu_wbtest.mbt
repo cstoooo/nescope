@@ -562,3 +562,68 @@ test "a program that enables the background gets pixels on screen" {
   }
   inspect_bool(lit > 0, true)
 }
+
+///|
+/// Places a sprite at an OAM index with the given Y and X.
+fn put_sprite(ppu : Ppu, index : Int32, y : UInt32, x : UInt32) -> Unit {
+  ppu.oam[index * 4] = y.to_byte()
+  ppu.oam[index * 4 + 1] = b'\x01'
+  ppu.oam[index * 4 + 2] = b'\x00'
+  ppu.oam[index * 4 + 3] = x.to_byte()
+}
+
+///|
+/// Eight sprites on one line is legal and must not set the flag; a ninth is what
+/// the flag exists to report.
+test "sprite overflow is set only by a ninth sprite on the same line" {
+  let ppu = ppu_with_chr()
+  ppu.mask.show_sprites = true
+  // Eight sprites share scanline 0, spread across the screen so they do not
+  // overlap each other.
+  for i in 0..<8 {
+    put_sprite(ppu, i, 0xFFU, (i * 16).reinterpret_as_uint())
+  }
+  ppu.evaluate_sprites(0)
+  inspect_bool(ppu.status.overflow, false)
+  inspect_eq(ppu.scanline_count, 8)
+  // The ninth is enough.
+  put_sprite(ppu, 8, 0xFFU, 0xF0U)
+  ppu.evaluate_sprites(0)
+  inspect_bool(ppu.status.overflow, true)
+  // Only eight are kept for rendering; the ninth is dropped.
+  inspect_eq(ppu.scanline_count, 8)
+}
+
+///|
+/// The evaluator looks at the vertical range only. A sprite whose X puts it
+/// completely off screen still occupies a slot and can still overflow the line,
+/// which is the behaviour a game that hides sprites by moving them right is
+/// relying on.
+test "a sprite off screen horizontally still counts toward overflow" {
+  let ppu = ppu_with_chr()
+  ppu.mask.show_sprites = true
+  for i in 0..<9 {
+    // X = $F0 puts every sprite well past the right edge, but their vertical
+    // extent still covers line 0.
+    put_sprite(ppu, i, 0xFFU, 0xF0U)
+  }
+  ppu.evaluate_sprites(0)
+  inspect_bool(ppu.status.overflow, true)
+}
+
+///|
+/// A sprite that does not cover the line at all must not count.
+test "sprites on other lines do not count toward overflow" {
+  let ppu = ppu_with_chr()
+  ppu.mask.show_sprites = true
+  for i in 0..<9 {
+    // Y = $10 puts the sprite's first row on scanline $11, nowhere near line 0.
+    put_sprite(ppu, i, 0x10U, 0x00U)
+  }
+  ppu.evaluate_sprites(0)
+  inspect_bool(ppu.status.overflow, false)
+  inspect_eq(ppu.scanline_count, 0)
+  // The same nine do overflow their own line.
+  ppu.evaluate_sprites(0x11)
+  inspect_bool(ppu.status.overflow, true)
+}

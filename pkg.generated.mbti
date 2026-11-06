@@ -280,6 +280,8 @@ pub(all) struct Ppu {
   mut write_latch : Bool
   nt_ram : FixedArray[Byte]
   palette : FixedArray[Byte]
+  scanline_sprites : FixedArray[Int32]
+  mut scanline_count : Int32
   oam : FixedArray[Byte]
   mut read_buffer : UInt32
   mut scanline : Int32

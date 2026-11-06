@@ -100,7 +100,7 @@ reference trace is known to be a state difference and not a formatting one.
 | APU frame counter: 4-step and 5-step sequences, frame IRQ | done |
 | APU channel status and length counters, as `$4015` reports them | done |
 | APU: waveform synthesis and mixing | planned |
-| Sprite overflow flag | approximate |
+| Sprite overflow flag, evaluated per scanline like the hardware | done |
 | PNG output of a finished frame, written out without a dependency | done |
 | Disassembly of all 151 official opcodes, in reference-log format | done |
 
