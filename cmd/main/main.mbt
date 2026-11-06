@@ -36,6 +36,7 @@ fn print_usage() -> Unit {
     #|                   mirroring, ROM sizes and where execution will start
     #|  --run <rom>      boot the ROM and run whole frames
     #|  --frames N       stop after N frames (default 1)
+    #|  --write-png FILE write the last completed frame as a PNG
     #|  --trace <file>   load a flat binary at $C000 and print one line per
     #|                   instruction, in the layout `nestest.log` uses
     #|  --limit N        stop after N instructions (default 20)
@@ -135,6 +136,19 @@ fn run_rom(args : Array[String]) -> Unit {
   )
   if stopped != "" {
     println("stopped    \{stopped}")
+  }
+  match option(args, "--write-png") {
+    Some(target) => {
+      // Writing the frame is what makes the renderer checkable by eye: a
+      // screenshot that matches a known-good one is worth more than any
+      // assertion about palette indices.
+      let png = @lib.encode_png(console.ppu.frame)
+      @fs.write_bytes_to_file(target, png) catch {
+        e => println("nescope: cannot write \{target}: \{Repr(e)}")
+      }
+      println("wrote      \{target} (\{png.length()} bytes)")
+    }
+    None => ()
   }
 }
 

@@ -6,11 +6,15 @@ pub const SCREEN_HEIGHT : Int32 = 240
 
 pub const SCREEN_WIDTH : Int32 = 256
 
+pub fn encode_png(FixedArray[Byte]) -> Bytes
+
 pub fn hex2(UInt32) -> String
 
 pub fn hex4(UInt32) -> String
 
 pub fn hex8(UInt32) -> String
+
+pub fn nes_colour(UInt32) -> (UInt32, UInt32, UInt32)
 
 pub fn peek(&Bus, UInt32) -> UInt32
 

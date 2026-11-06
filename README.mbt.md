@@ -52,14 +52,19 @@ reset      C004
 Boot it and run a frame:
 
 ```sh
-moon run cmd/main -- --run internal/fixtures/nestest.nes --frames 2
+moon run cmd/main -- --run internal/fixtures/nestest.nes --frames 2 --write-png frame.png
 ```
 
 ```
 frames     2
 cycles     59567
 pc         C5F4  a=00 x=00 y=00 sp=FA
+wrote      frame.png (184638 bytes)
 ```
+
+`nestest` renders nothing but its backdrop, so that frame is a single flat grey.
+The point of the flag is that any ROM's frame becomes a file you can look at,
+which is the only way to check rendering without a window system.
 
 `--trace` still exists for flat binaries: it loads an image at `$C000` and prints
 one line per instruction in the layout `nestest.log` uses. Its `(?)` column is
@@ -93,7 +98,7 @@ reference trace is known to be a state difference and not a formatting one.
 | Mappers: MMC3, MMC5, VRC | planned |
 | APU: pulse, triangle, noise, DMC, frame sequencer | planned |
 | Sprite overflow flag | approximate |
-| PNG output of a finished frame | planned |
+| PNG output of a finished frame, written out without a dependency | done |
 
 ## How it is tested
 
@@ -128,6 +133,7 @@ isa.mbt          the opcode table
 cart.mbt         iNES parsing and the cartridge's memories
 mapper.mbt       bank switching: NROM, UxROM, CNROM, MMC1
 ppu.mbt          registers, rendering, sprites, palette and mirroring
+png.mbt          palette to RGB, and a dependency-free PNG writer
 bus.mbt          the console: address decoding, DMA, controllers
 cmd/main/        the CLI
 ```
