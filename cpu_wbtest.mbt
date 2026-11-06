@@ -274,7 +274,7 @@ fn parse_golden(
 ///|
 /// The 16-bit program counter in the first four columns.
 fn parse_pc(line : String) -> UInt32 {
-  let view = line.view()
+  let view = line.exact_view(start=0, end=line.length())
   let mut value = 0U
   for i in 0..<4 {
     value = (value << 4) | hex_value(view.unsafe_get(i).unsafe_to_char())
@@ -286,7 +286,7 @@ fn parse_pc(line : String) -> UInt32 {
 /// Reads the hex digits following a `LABEL:` marker, skipping the left padding
 /// the log uses to keep its columns aligned.
 fn parse_field(line : String, label : String) -> UInt32 {
-  let view = line.view()
+  let view = line.exact_view(start=0, end=line.length())
   let at = match view.find(label) {
     Some(i) => i
     None => return 0
@@ -320,7 +320,7 @@ fn parse_field(line : String, label : String) -> UInt32 {
 /// one place the format is inconsistent; reading it as hex would desynchronise
 /// the cycle column from the third line onward.
 fn parse_decimal(line : String, label : String) -> Int64 {
-  let view = line.view()
+  let view = line.exact_view(start=0, end=line.length())
   let at = match view.find(label) {
     Some(i) => i
     None => return 0L
