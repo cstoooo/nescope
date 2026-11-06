@@ -90,19 +90,23 @@ test "a length counter write only loads while the channel is on" {
 test "the half-frame clock drains length counters and silencing clears them" {
   let apu = Apu::new()
   apu.write_status(0x0FU)
-  // Load one unit of length on channel zero: top five bits of $04.
+  // The top five bits of $4003 index the load table, so $08 loads 254 rather than
+  // the 1 that the raw bits suggest. Every later assertion depends on that table,
+  // which is why it is checked before the draining.
   apu.write_register(0x03U, 0x08U)
+  inspect_eq(apu.length[0], 254U)
   inspect_eq(apu.read_status() & 0x01U, 0x01U)
   // The sequence's first two steps land at 7457 and 14913 cycles: a quarter-frame
   // clock then a half-frame one. Only the half-frame clock drains the length
-  // counter, so it is the second step that silences the channel.
-  ignore(apu.tick(14913L))
-  inspect_eq(apu.read_status() & 0x01U, 0U)
-  // Writing a channel's bit low in $4015 clears its length counter outright, so
-  // the channel falls silent without waiting for a clock.
-  apu.write_register(0x03U, 0x08U)
-  inspect_eq(apu.read_status() & 0x01U, 0x01U)
+  // counter, so the first step changes nothing.
+  ignore(apu.tick(7457L))
+  inspect_eq(apu.length[0], 254U)
+  ignore(apu.tick(14913L - 7457L))
+  inspect_eq(apu.length[0], 253U)
+  // Writing a channel's bit low in $4015 clears the counter outright, so the
+  // channel falls silent without waiting for 253 more clocks.
   apu.write_status(0x00U)
+  inspect_eq(apu.length[0], 0U)
   inspect_eq(apu.read_status() & 0x01U, 0U)
 }
 
@@ -181,4 +185,25 @@ test "the console takes the frame interrupt through the IRQ vector" {
   // than on the reset address.
   inspect_bool(console.cpu.pc >= 0xC000U, true)
   inspect_bool(console.cpu.flag(Interrupt), true)
+}
+
+///|
+/// The load table is not monotonic, and index 1 in particular loads 254 — the
+/// longest note on the table from the second-smallest index. Pinning a few
+/// entries keeps a later "simplification" from replacing it with the index.
+test "the length load table is the hardware one, not the index" {
+  let table = length_table()
+  inspect_eq(table.length(), 32)
+  inspect_eq(table[0], 10U)
+  inspect_eq(table[1], 254U)
+  inspect_eq(table[2], 20U)
+  inspect_eq(table[31], 30U)
+  let apu = Apu::new()
+  apu.write_status(0x01U)
+  // $4003's top five bits are 1, so the counter loads 254 and not 1.
+  apu.write_register(0x03U, 0x08U)
+  inspect_eq(apu.length[0], 254U)
+  // Index 2 loads 20, which is shorter than index 1 despite being larger.
+  apu.write_register(0x03U, 0x10U)
+  inspect_eq(apu.length[0], 20U)
 }

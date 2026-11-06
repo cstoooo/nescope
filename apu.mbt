@@ -304,6 +304,22 @@ pub fn Apu::write_register(
 }
 
 ///|
+/// The length counter's load table.
+///
+/// The five bits written to a channel's fourth register are an index into this
+/// table, not a length. The table is deliberately non-monotonic — index 1 loads
+/// 254 and index 2 loads 20 — because the values were chosen so that a small
+/// index can still produce a long note. Treating the index as the length gives
+/// every short-written note the wrong duration, and index 1 a sixteenth of the
+/// note it should be.
+fn length_table() -> FixedArray[UInt32] {
+  [
+    10U, 254U, 20U, 2U, 40U, 4U, 80U, 6U, 160U, 8U, 60U, 10U, 14U, 12U, 26U, 14U,
+    12U, 16U, 24U, 18U, 48U, 20U, 96U, 22U, 192U, 24U, 72U, 26U, 16U, 28U, 32U, 30U,
+  ]
+}
+
+///|
 /// Loads a channel's length counter from the top five bits of a register write.
 fn Apu::load_length(self : Apu, channel : Int32, value : UInt32) -> Unit {
   if channel < 0 || channel >= 4 {
@@ -315,5 +331,5 @@ fn Apu::load_length(self : Apu, channel : Int32, value : UInt32) -> Unit {
   if (self.enabled_channels & (1U << channel)) == 0U {
     return
   }
-  self.length[channel] = value & 0x1FU
+  self.length[channel] = length_table()[(value & 0x1FU).reinterpret_as_int()]
 }
