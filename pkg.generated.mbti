@@ -107,6 +107,7 @@ pub(all) struct Console {
   ram : FixedArray[Byte]
   mut controllers : (UInt32, UInt32)
   mut controller_shift : (Int32, Int32)
+  mut controller_strobe : Bool
   mut dma_cycles : Int64
   mut apu : Apu
   mut irq_pending : Bool

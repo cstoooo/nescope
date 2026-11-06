@@ -28,6 +28,10 @@ pub(all) struct Console {
   mut controllers : (UInt32, UInt32)
   /// How many bits each controller has shifted out since the strobe went low.
   mut controller_shift : (Int32, Int32)
+  /// True while $4016's low bit is high. A held strobe reloads the shift register
+  /// on every read, so the button list starts over each time instead of walking
+  /// past it.
+  mut controller_strobe : Bool
   /// True while the CPU is stalled waiting for sprite DMA.
   mut dma_cycles : Int64
   /// The audio unit. It does not synthesize sound here, but it owns the frame
@@ -59,6 +63,7 @@ pub fn Console::new(cart : Cart) -> Console {
     ram: FixedArray::make(0x800, b'\x00'),
     controllers: (0U, 0U),
     controller_shift: (0, 0),
+    controller_strobe: false,
     dma_cycles: 0L,
     apu: Apu::new(),
     irq_pending: false,
@@ -139,7 +144,7 @@ pub fn Console::write(self : Console, address : UInt32, value : UInt32) -> Unit 
   } else if offset == 0x4017 {
     self.apu.write_register(0x17U, value)
   } else if offset == 0x4016 {
-    self.strobe_controllers()
+    self.write_strobe((value & 1U) != 0U)
   } else if offset >= 0x6000 && offset < 0x8000 {
     self.cart.prg_ram[(offset - 0x6000) % self.cart.prg_ram.length()] = (value &
     0xFF).to_byte()
@@ -190,12 +195,15 @@ fn Console::sprite_dma(self : Console, page : UInt32) -> Unit {
 }
 
 ///|
-/// Latches the controller state while the strobe is held high.
+/// Sets the controller strobe.
 ///
 /// Writing $4016 with the low bit set holds both controllers' shift registers in a
 /// loop; clearing it starts the serial read. Games pulse it high then low once
-/// per frame.
-fn Console::strobe_controllers(self : Console) -> Unit {
+/// per frame. The high state has to be remembered rather than merely acted on:
+/// while it is held, every read returns button A again instead of advancing
+/// through the button list.
+fn Console::write_strobe(self : Console, high : Bool) -> Unit {
+  self.controller_strobe = high
   self.controller_shift = (0, 0)
 }
 
@@ -205,6 +213,16 @@ fn Console::strobe_controllers(self : Console) -> Unit {
 /// After the eighth shift the register returns 1 forever, which is how a game
 /// tells a standard pad from a device that sends more bits.
 fn Console::read_controller(self : Console, port : Int32) -> UInt32 {
+  // A held strobe keeps the register loaded, so the read is always the first
+  // button rather than the next one in the list.
+  if self.controller_strobe {
+    let latched = if port == 0 {
+      self.controllers.0
+    } else {
+      self.controllers.1
+    }
+    return latched & 1U
+  }
   let state = if port == 0 { self.controllers.0 } else { self.controllers.1 }
   let shifted = if port == 0 {
     self.controller_shift.0

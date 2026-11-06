@@ -201,3 +201,44 @@ fn inspect_tuple(
   buf.write_string(cycles.to_string())
   buf.to_string()
 }
+
+///|
+/// The controller's shift register reads 1 forever once it has shifted out all
+/// eight bits, which is how a game detects that it has read past the button list.
+/// A strobe held high keeps reloading the latch, so the bits repeat.
+test "a held strobe keeps reloading the controller latch" {
+  let cart = fixture_cart("nestest.nes")
+  let console = Console::new(cart)
+  console.set_buttons(0, [A, B, Start])
+  console.write(0x4016U, 1U)
+  // Read while the strobe is still high: every read returns button A.
+  for _ in 0..<3 {
+    inspect_eq(console.read(0x4016U), 1U)
+  }
+  // Dropping the strobe starts the shift at the first button again.
+  console.write(0x4016U, 0U)
+  inspect_eq(console.read(0x4016U), 1U)
+  inspect_eq(console.read(0x4016U), 1U)
+  inspect_eq(console.read(0x4016U), 0U)
+  // Now it walks the list: the eighth bit is the final button, and past that the
+  // register reads high forever.
+  for _ in 0..<5 {
+    ignore(console.read(0x4016U))
+  }
+  inspect_eq(console.read(0x4016U), 1U)
+  inspect_eq(console.read(0x4016U), 1U)
+}
+
+///|
+/// The second port is independent of the first, so a two-player game reading both
+/// gets two different answers.
+test "the two controller ports are independent" {
+  let cart = fixture_cart("nestest.nes")
+  let console = Console::new(cart)
+  console.set_buttons(0, [A])
+  console.set_buttons(1, [B])
+  console.write(0x4016U, 1U)
+  console.write(0x4016U, 0U)
+  inspect_eq(console.read(0x4016U), 1U)
+  inspect_eq(console.read(0x4017U), 0U)
+}
