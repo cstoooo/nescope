@@ -462,10 +462,22 @@ fn Ppu::render_pixel(self : Ppu) -> Unit {
         // opaque background pixel. Raising it whenever sprite zero covers this
         // scanline is the usual shortcut and it breaks every game that splits the
         // screen at a status bar, because the hit arrives a whole scanline early.
+        //
+        // The priority bit does not affect this: a sprite flagged as behind the
+        // background still raises the hit, and games rely on that to time splits
+        // with a marker sprite hidden under a solid tile.
         if pixel.is_zero && background.covered {
           self.status.sprite_zero_hit = true
         }
-        index = pixel.colour
+        // Bit 5 of the attributes byte puts the sprite behind opaque background
+        // pixels. Only an *opaque* background pixel hides it: over a transparent
+        // tile the sprite still shows, which is why a character can walk in front
+        // of a background with holes in it.
+        if pixel.behind && background.covered {
+          ()
+        } else {
+          index = pixel.colour
+        }
       }
       None => ()
     }
@@ -633,6 +645,8 @@ priv struct SpritePixel {
   colour : UInt32
   /// True when this came from the sprite at OAM index zero.
   is_zero : Bool
+  /// True when the sprite's priority bit says it belongs behind the background.
+  behind : Bool
 }
 
 ///|
@@ -687,6 +701,7 @@ fn Ppu::sprite_pixel(self : Ppu, x : Int32, y : Int32) -> SpritePixel? {
       return Some({
         colour: self.palette_byte(0x10 + palette * 4 + pixel) & 0x3F,
         is_zero: i == 0,
+        behind: (attributes & 0x20) != 0,
       })
     }
   }

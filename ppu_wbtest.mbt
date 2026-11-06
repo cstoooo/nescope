@@ -627,3 +627,97 @@ test "sprites on other lines do not count toward overflow" {
   ppu.evaluate_sprites(0x11)
   inspect_bool(ppu.status.overflow, true)
 }
+
+///|
+/// Bit 5 of a sprite's attributes puts it behind opaque background pixels. Over a
+/// transparent tile the sprite still shows, which is what lets a character walk
+/// across a background with holes in it.
+test "sprite priority hides a sprite behind an opaque background only" {
+  // Runs the same sprite twice against a PPU whose background is opaque in the
+  // first case and transparent in the second, so the only difference in the
+  // output is the layer the pixel came from.
+  let solid = ppu_with_chr()
+  for row in 0..<8 {
+    // Tile 2 is solid colour 1 in the low plane; tile 0 stays all zeroes.
+    solid.chr[32 + row] = b'\xff'
+  }
+  fill_nametable(solid, 2U, 0x00U)
+  solid.set_palette_byte(0x00U, 0x0FU)
+  solid.set_palette_byte(0x01U, 0x30U)
+  // The sprite's own colour: palette 0, entry 3, distinct from both background
+  // colours so the assertion says which layer won.
+  solid.set_palette_byte(0x13U, 0x16U)
+  for row in 0..<8 {
+    solid.chr[16 + row] = b'\xff'
+    solid.chr[24 + row] = b'\xff'
+  }
+  solid.oam[0] = b'\xFF'
+  solid.oam[1] = b'\x01'
+  // Priority set, no flip.
+  solid.oam[2] = b'\x20'
+  solid.oam[3] = b'\x00'
+  solid.mask.show_sprites = true
+  solid.mask.show_sprites_left = true
+  solid.mask.show_background = true
+  solid.mask.show_background_left = true
+  solid.v = 0x2000U
+  for _ in 0..<4 {
+    ignore(solid.tick())
+  }
+  // Opaque background wins over a sprite flagged as behind it.
+  inspect_eq(solid.frame[0].to_int().reinterpret_as_uint(), 0x30U)
+
+  let clear = ppu_with_chr()
+  clear.set_palette_byte(0x00U, 0x0FU)
+  clear.set_palette_byte(0x13U, 0x16U)
+  for row in 0..<8 {
+    clear.chr[16 + row] = b'\xff'
+    clear.chr[24 + row] = b'\xff'
+  }
+  // Tile 0 is all zeroes, so the background contributes nothing here.
+  clear.oam[0] = b'\xFF'
+  clear.oam[1] = b'\x01'
+  clear.oam[2] = b'\x20'
+  clear.oam[3] = b'\x00'
+  clear.mask.show_sprites = true
+  clear.mask.show_sprites_left = true
+  clear.mask.show_background = true
+  clear.mask.show_background_left = true
+  clear.v = 0x2000U
+  for _ in 0..<4 {
+    ignore(clear.tick())
+  }
+  // Over a transparent tile the same behind-flagged sprite is visible.
+  inspect_eq(clear.frame[0].to_int().reinterpret_as_uint(), 0x16U)
+}
+
+///|
+/// A sprite with priority clear draws over the background, which is the case the
+/// other half of the bit exists to distinguish.
+test "a foreground sprite over an opaque background keeps its own colour" {
+  let ppu = ppu_with_chr()
+  for row in 0..<8 {
+    ppu.chr[32 + row] = b'\xff'
+  }
+  fill_nametable(ppu, 2U, 0x00U)
+  ppu.set_palette_byte(0x00U, 0x0FU)
+  ppu.set_palette_byte(0x01U, 0x30U)
+  ppu.set_palette_byte(0x13U, 0x16U)
+  for row in 0..<8 {
+    ppu.chr[16 + row] = b'\xff'
+    ppu.chr[24 + row] = b'\xff'
+  }
+  ppu.oam[0] = b'\xFF'
+  ppu.oam[1] = b'\x01'
+  ppu.oam[2] = b'\x00'
+  ppu.oam[3] = b'\x00'
+  ppu.mask.show_sprites = true
+  ppu.mask.show_sprites_left = true
+  ppu.mask.show_background = true
+  ppu.mask.show_background_left = true
+  ppu.v = 0x2000U
+  for _ in 0..<4 {
+    ignore(ppu.tick())
+  }
+  inspect_eq(ppu.frame[0].to_int().reinterpret_as_uint(), 0x16U)
+}

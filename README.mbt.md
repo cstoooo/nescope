@@ -57,8 +57,8 @@ moon run cmd/main -- --run internal/fixtures/nestest.nes --frames 2 --write-png 
 
 ```
 frames     2
-cycles     59567
-pc         C5F4  a=00 x=00 y=00 sp=FA
+cycles     59563
+pc         C038  a=00 x=FC y=0E sp=FF
 wrote      frame.png (184638 bytes)
 ```
 
@@ -99,6 +99,7 @@ reference trace is known to be a state difference and not a formatting one.
 | GxROM (mapper 66): one register shared between program and character banks | done |
 | PPU registers, read buffer, scroll latch, palette mirrors | done |
 | PPU: per-pixel background and sprite rendering | done |
+| Sprite priority bit: a behind-flagged sprite yields to an opaque background | done |
 | Sprite DMA through `$4014` with the odd-cycle stall | done |
 | Controller shift registers in hardware order | done |
 | Cartridge work RAM at `$6000-$7FFF` | done |
