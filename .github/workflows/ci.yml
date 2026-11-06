@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install MoonBit
+        uses: moonbit-community/setup-moonbit@v1
+
+      - name: Toolchain versions
+        run: |
+          moon version --all
+
+      - name: Format check
+        run: |
+          moon fmt
+          git diff --exit-code
+
+      - name: Type check with warnings denied
+        run: moon check --deny-warn
+
+      - name: Run tests
+        run: moon test
+
+      - name: Build the CLI
+        run: moon build cmd/main
+
+      - name: Smoke-test the CLI on a real ROM
+        run: |
+          moon run cmd/main -- --trace internal/fixtures/nestest.nes --limit 5

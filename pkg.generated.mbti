@@ -1,0 +1,139 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "cstoooo/nescope"
+
+// Values
+pub fn hex2(UInt32) -> String
+
+pub fn hex4(UInt32) -> String
+
+pub fn hex8(UInt32) -> String
+
+pub fn peek(&Bus, UInt32) -> UInt32
+
+// Errors
+pub(all) suberror NesError {
+  UnexpectedEnd(offset~ : Int64, needed~ : Int64, available~ : Int64)
+  NotAnINes
+  BadValue(field~ : String, value~ : Int64)
+  Truncated(kind~ : String, declared~ : Int64, present~ : Int64)
+  UnsupportedMapper(number~ : UInt32)
+  UnknownOpcode(opcode~ : UInt32, at~ : UInt32)
+  LockoutChip
+}
+pub fn NesError::output(Self, &Logger) -> Unit
+pub fn NesError::to_string(Self) -> String
+pub impl Show for NesError
+
+// Types and methods
+pub(all) enum Button {
+  A
+  B
+  Select
+  Start
+  Up
+  Down
+  Left
+  Right
+}
+pub fn Button::shift_index(Self) -> Int32
+
+pub(all) struct Cpu {
+  mut a : UInt32
+  mut x : UInt32
+  mut y : UInt32
+  mut sp : UInt32
+  mut pc : UInt32
+  mut p : UInt32
+  mut cycles : Int64
+  mut stalled : Int64
+  mut last_access : MemoryAccess?
+}
+pub fn Cpu::absolute(Self, &Bus) -> UInt32
+pub fn Cpu::absolute_x(Self, &Bus) -> UInt32
+pub fn Cpu::absolute_x_page(Self, &Bus) -> (UInt32, Int64)
+pub fn Cpu::absolute_y(Self, &Bus) -> UInt32
+pub fn Cpu::absolute_y_page(Self, &Bus) -> (UInt32, Int64)
+pub fn Cpu::adc(Self, UInt32) -> Unit
+pub fn Cpu::and_(Self, UInt32) -> Unit
+pub fn Cpu::asl(Self, UInt32) -> (UInt32, UInt32)
+pub fn Cpu::bit(Self, UInt32) -> Unit
+pub fn Cpu::branch(Self, &Bus, Bool) -> Int64
+pub fn Cpu::brk(Self, &Bus) -> Int64
+pub fn Cpu::compare(Self, UInt32, UInt32) -> Unit
+pub fn Cpu::dec(Self, UInt32) -> UInt32
+pub fn Cpu::eor(Self, UInt32) -> Unit
+pub fn Cpu::flag(Self, Flag) -> Bool
+pub fn Cpu::immediate(Self, &Bus) -> UInt32
+pub fn Cpu::inc(Self, UInt32) -> UInt32
+pub fn Cpu::indexed_indirect(Self, &Bus) -> UInt32
+pub fn Cpu::indirect_indexed(Self, &Bus) -> UInt32
+pub fn Cpu::indirect_indexed_page(Self, &Bus) -> (UInt32, Int64)
+pub fn Cpu::jmp_indirect(Self, &Bus) -> Int64
+pub fn Cpu::lda(Self, UInt32) -> Unit
+pub fn Cpu::ldx(Self, UInt32) -> Unit
+pub fn Cpu::ldy(Self, UInt32) -> Unit
+pub fn Cpu::lsr(Self, UInt32) -> (UInt32, UInt32)
+pub fn Cpu::new() -> Self
+pub fn Cpu::ora(Self, UInt32) -> Unit
+pub fn Cpu::rol(Self, UInt32) -> (UInt32, UInt32)
+pub fn Cpu::ror(Self, UInt32) -> (UInt32, UInt32)
+pub fn Cpu::sbc(Self, UInt32) -> Unit
+pub fn Cpu::set_flag(Self, Flag, Bool) -> Unit
+pub fn Cpu::set_zn(Self, UInt32) -> Unit
+pub fn Cpu::step(Self, &Bus) -> StepResult raise NesError
+pub fn Cpu::store(Self, &Bus, UInt32, UInt32) -> Unit
+pub fn Cpu::zeropage(Self, &Bus) -> UInt32
+pub fn Cpu::zeropage_x(Self, &Bus) -> UInt32
+pub fn Cpu::zeropage_y(Self, &Bus) -> UInt32
+
+pub(all) enum Flag {
+  Carry
+  Zero
+  Interrupt
+  Decimal
+  Break
+  Unused
+  Overflow
+  Negative
+}
+pub fn Flag::bit(Self) -> Int32
+pub fn Flag::mask(Self) -> UInt32
+
+pub(all) struct FlatRam {
+  bytes : FixedArray[Byte]
+}
+pub fn FlatRam::load(Self, UInt32, Bytes) -> Unit
+pub fn FlatRam::new() -> Self
+pub fn FlatRam::read(Self, UInt32) -> UInt32
+pub fn FlatRam::write(Self, UInt32, UInt32) -> Unit
+pub impl Bus for FlatRam
+
+pub(all) struct MemoryAccess {
+  address : UInt32
+  value : UInt32
+  write : Bool
+}
+
+pub(all) enum Region {
+  NTSC
+  PAL
+  Dendy
+}
+pub fn Region::cpu_hz(Self) -> Int64
+pub fn Region::dots_per_scanline(Self) -> Int32
+pub fn Region::scanlines_per_frame(Self) -> Int32
+
+pub(all) struct StepResult {
+  cycles : Int64
+  opcode : UInt32
+  at : UInt32
+  memory : MemoryAccess?
+}
+
+// Type aliases
+
+// Traits
+pub(open) trait Bus {
+  fn read(Self, UInt32) -> UInt32
+  fn write(Self, UInt32, UInt32) -> Unit
+}

@@ -1,0 +1,7 @@
+import {
+  "cstoooo/nescope" @lib,
+  "moonbitlang/core/env",
+  "moonbitlang/x/fs",
+}
+
+pkgtype(kind: "executable")
