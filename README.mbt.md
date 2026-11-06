@@ -66,6 +66,11 @@ wrote      frame.png (184638 bytes)
 The point of the flag is that any ROM's frame becomes a file you can look at,
 which is the only way to check rendering without a window system.
 
+A cartridge whose header sets the battery bit gets a save file beside it:
+`--run zelda.nes` reads `zelda.srm` before booting and writes it back after the
+last frame, with the same name and format every other emulator uses. A board
+without a battery writes nothing, so a stray `.srm` is never clobbered.
+
 `--trace` still exists for flat binaries: it loads an image at `$C000` and prints
 one line per instruction in the layout `nestest.log` uses. Its `(?)` column is
 the mnemonic, which this build does not disassemble yet. It is left visibly
@@ -96,6 +101,8 @@ reference trace is known to be a state difference and not a formatting one.
 | PPU: per-pixel background and sprite rendering | done |
 | Sprite DMA through `$4014` with the odd-cycle stall | done |
 | Controller shift registers in hardware order | done |
+| Cartridge work RAM at `$6000-$7FFF` | done |
+| Battery saves: `.srm` beside the ROM, loaded before boot and written after | done |
 | Four-screen mirroring with its own 4 KiB of nametable RAM | done |
 | Sprite-zero hit: opaque sprite pixel over opaque background pixel | done |
 | Mappers: MMC5, VRC, MMC2 and the other discrete boards | planned |

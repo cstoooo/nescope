@@ -70,6 +70,7 @@ pub fn Button::shift_index(Self) -> Int32
 pub(all) struct Cart {
   mirroring : Mirroring
   has_battery : Bool
+  prg_ram : FixedArray[Byte]
   prg : Bytes
   chr : FixedArray[Byte]
   chr_ram : Bool
@@ -93,8 +94,10 @@ pub(all) struct Cart {
   mut irq_enabled : Bool
 }
 pub fn Cart::chr_byte(Self, Int64) -> UInt32
+pub fn Cart::load_save(Self, Bytes) -> Unit
 pub fn Cart::parse(Bytes) -> Self raise NesError
 pub fn Cart::prg_byte(Self, Int64) -> UInt32
+pub fn Cart::save_data(Self) -> Bytes
 pub fn Cart::write_chr(Self, Int64, UInt32) -> Bool
 
 pub(all) struct Console {

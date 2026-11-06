@@ -115,6 +115,20 @@ fn run_rom(args : Array[String]) -> Unit {
       return
     }
   }
+  // A battery-backed cartridges's RAM lives in a file beside the ROM, named the
+  // way every other NES emulator names it, so a save made here is the same save
+  // another emulator would load.
+  let save_path = sav_path(path)
+  if cart.has_battery {
+    let existing = Ok(@fs.read_file_to_bytes(save_path)) catch { _ => Err(()) }
+    match existing {
+      Ok(data) => {
+        cart.load_save(data)
+        println("loaded     \{save_path} (\{data.length()} bytes)")
+      }
+      Err(_) => ()
+    }
+  }
   let console = @lib.Console::new(cart)
   let mut ran = 0L
   let mut stopped = ""
@@ -136,6 +150,12 @@ fn run_rom(args : Array[String]) -> Unit {
   )
   if stopped != "" {
     println("stopped    \{stopped}")
+  }
+  if console.cart.has_battery {
+    let data = console.cart.save_data()
+    @fs.write_bytes_to_file(save_path, data) catch {
+      e => println("nescope: cannot write \{save_path}: \{Repr(e)}")
+    }
   }
   match option(args, "--write-png") {
     Some(target) => {
@@ -197,6 +217,26 @@ fn trace(args : Array[String]) -> Unit {
     cpu.pc = start
     run_trace(cpu, ram, limit)
   }
+}
+
+///|
+/// The save file that belongs beside a ROM: same path, `.srm` extension.
+fn sav_path(rom : String) -> String {
+  // Strip a trailing ".nes" if there is one, then append. A ROM whose name does
+  // not end that way keeps its whole name, so two files called "a.nes" and "a"
+  // do not share a save.
+  let suffix = ".nes"
+  if rom.length() > suffix.length() {
+    let tail = rom.exact_view(
+      start=rom.length() - suffix.length(),
+      end=rom.length(),
+    )
+    if tail == suffix {
+      let stem = rom.exact_view(start=0, end=rom.length() - suffix.length())
+      return stem.to_owned() + ".srm"
+    }
+  }
+  rom + ".srm"
 }
 
 ///|

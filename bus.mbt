@@ -102,6 +102,14 @@ pub fn Console::read(self : Console, address : UInt32) -> UInt32 {
     self.read_controller(0)
   } else if offset == 0x4017 {
     self.read_controller(1)
+  } else if offset >= 0x6000 && offset < 0x8000 {
+    // The cartridge's own RAM. It is mirrored across the whole 8 KiB window
+    // because a board with a smaller chip repeats it, which is the same trick
+    // work RAM uses at $0000.
+    self.cart.prg_ram[(offset - 0x6000) % self.cart.prg_ram.length()]
+    .to_int()
+    .reinterpret_as_uint() &
+    0xFF
   } else if offset >= 0x4020 {
     self.cart_read(at)
   } else {
@@ -132,6 +140,9 @@ pub fn Console::write(self : Console, address : UInt32, value : UInt32) -> Unit 
     self.apu.write_register(0x17U, value)
   } else if offset == 0x4016 {
     self.strobe_controllers()
+  } else if offset >= 0x6000 && offset < 0x8000 {
+    self.cart.prg_ram[(offset - 0x6000) % self.cart.prg_ram.length()] = (value &
+    0xFF).to_byte()
   } else if offset >= 0x4020 {
     // Program RAM, save RAM and the mapper's own registers share this range. The
     // boards modelled here have no save RAM in this window, so a write either

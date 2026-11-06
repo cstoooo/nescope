@@ -11,7 +11,12 @@
 ///
 /// Uniform banks make the assertion trivial: reading $8000 and getting 3 means
 /// bank 3 answered, with no need to know anything about the ROM's contents.
-fn synth_rom(mapper : Int32, prg_banks : Int32, chr_banks : Int32) -> Bytes {
+fn synth_rom(
+  mapper : Int32,
+  prg_banks : Int32,
+  chr_banks : Int32,
+  battery~ : Bool = false,
+) -> Bytes {
   let out = Buffer::Buffer(
     size_hint=16 + prg_banks * 0x4000 + chr_banks * 0x2000,
   )
@@ -21,7 +26,10 @@ fn synth_rom(mapper : Int32, prg_banks : Int32, chr_banks : Int32) -> Bytes {
   out.write_byte(b'\x1A')
   out.write_byte(prg_banks.reinterpret_as_uint().to_byte())
   out.write_byte(chr_banks.reinterpret_as_uint().to_byte())
-  out.write_byte(((mapper & 0x0F) << 4).reinterpret_as_uint().to_byte())
+  let battery_bit = if battery { 0x02 } else { 0x00 }
+  out.write_byte(
+    (((mapper & 0x0F) << 4) | battery_bit).reinterpret_as_uint().to_byte(),
+  )
   out.write_byte((mapper & 0xF0).reinterpret_as_uint().to_byte())
   for _ in 0..<8 {
     out.write_byte(b'\x00')
@@ -402,4 +410,71 @@ test "GxROM splits its one register between program and character banks" {
   console.ppu.v = 0x0000U
   ignore(console.ppu.read_register(0x07U))
   inspect_eq(console.ppu.read_register(0x07U), 2U)
+}
+
+///|
+/// Cartridge RAM at $6000 is readable and writable, which is what a game with a
+/// save battery stores its progress in.
+test "work RAM answers at $6000 and holds what is written" {
+  let cart = Cart::parse(synth_rom(0, 1, 1, battery=true)) catch {
+    _ => fail("parse")
+  }
+  let console = Console::new(cart)
+  inspect_eq(console.read(0x6000U), 0U)
+  console.write(0x6000U, 0x5AU)
+  console.write(0x7FFFU, 0xA5U)
+  inspect_eq(console.read(0x6000U), 0x5AU)
+  inspect_eq(console.read(0x7FFFU), 0xA5U)
+  // The two ends are distinct addresses, not one mirror.
+  inspect_eq(console.read(0x7FFEU), 0U)
+}
+
+///|
+/// A board with a battery hands its RAM back as a save file of exactly the RAM's
+/// size, and loading that file restores every byte.
+test "a battery board round-trips its save file" {
+  let cart = Cart::parse(synth_rom(0, 1, 1, battery=true)) catch {
+    _ => fail("parse")
+  }
+  let console = Console::new(cart)
+  console.write(0x6000U, 0x12U)
+  console.write(0x6123U, 0x34U)
+  let saved = console.cart.save_data()
+  inspect_eq(saved.length(), 0x2000)
+  let fresh_cart = Cart::parse(synth_rom(0, 1, 1, battery=true)) catch {
+    _ => fail("parse")
+  }
+  let fresh = Console::new(fresh_cart)
+  inspect_eq(fresh.read(0x6000U), 0U)
+  fresh.cart.load_save(saved)
+  inspect_eq(fresh.read(0x6000U), 0x12U)
+  inspect_eq(fresh.read(0x6123U), 0x34U)
+}
+
+///|
+/// A board without a battery writes no save at all, so a stray `.srm` beside the
+/// ROM cannot be clobbered by a cartridge that never had one.
+test "a board without a battery produces no save data" {
+  let cart = Cart::parse(synth_rom(0, 1, 1)) catch { _ => fail("parse") }
+  let console = Console::new(cart)
+  console.write(0x6000U, 0x99U)
+  inspect_eq(console.cart.save_data().length(), 0)
+}
+
+///|
+/// A short save file fills what it can and leaves the rest zeroed, and a long one
+/// is truncated rather than overflowing the RAM array.
+test "save loading tolerates files of the wrong size" {
+  let cart = Cart::parse(synth_rom(0, 1, 1, battery=true)) catch {
+    _ => fail("parse")
+  }
+  let console = Console::new(cart)
+  console.cart.load_save(Bytes::from_array([b'\x01', b'\x02']))
+  inspect_eq(console.read(0x6000U), 0x01U)
+  inspect_eq(console.read(0x6001U), 0x02U)
+  inspect_eq(console.read(0x6002U), 0x00U)
+  let big = Bytes::make(0x4000, b'\x7F')
+  console.cart.load_save(big)
+  inspect_eq(console.read(0x6000U), 0x7FU)
+  inspect_eq(console.read(0x7FFFU), 0x7FU)
 }

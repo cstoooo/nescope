@@ -53,6 +53,13 @@ pub(all) struct Cart {
   mirroring : Mirroring
   /// True when the cartridge has battery-backed save RAM.
   has_battery : Bool
+  /// The cartridge's own RAM at $6000-$7FFF, 8 KiB.
+  ///
+  /// Almost every board with a mapper has this, and it is not only for saves: a
+  /// game puts its level state, its music pointers and often its stack-like
+  /// scratch there. A board that answers $6000 with open bus runs off the rails
+  /// long before it tries to save anything.
+  prg_ram : FixedArray[Byte]
   /// Program ROM as stored in the file, without the header.
   prg : Bytes
   /// Character memory: ROM from the file, or zeroed RAM when the header asks for
@@ -227,6 +234,7 @@ pub fn Cart::parse(bytes : Bytes) -> Cart raise NesError {
   {
     mirroring: mirroring_of(flags6),
     has_battery: (flags6 & 0x02) != 0,
+    prg_ram: FixedArray::make(0x2000, b'\x00'),
     prg,
     chr,
     chr_ram,
@@ -384,3 +392,42 @@ pub fn Mirroring::name(self : Mirroring) -> String {
 ///|
 
 ///
+
+///|
+/// The save file's contents: the cartridge's RAM, or nothing when the board has
+/// no battery.
+///
+/// A board without a battery returns an empty array rather than its RAM, because
+/// writing a save for a cartridge that cannot hold one would silently overwrite a
+/// real save from a different game sharing the name.
+pub fn Cart::save_data(self : Cart) -> Bytes {
+  if !self.has_battery {
+    return Bytes::new(0)
+  }
+  let out = Buffer::Buffer(size_hint=self.prg_ram.length())
+  for i in 0..<self.prg_ram.length() {
+    out.write_byte(self.prg_ram[i])
+  }
+  out.to_bytes()
+}
+
+///|
+/// Loads a save file into the cartridge's RAM.
+///
+/// A file shorter than the RAM fills what it has and leaves the rest zeroed, which
+/// is what the hardware would do with a partly-written chip. A file longer than
+/// the RAM is truncated: the extra bytes belong to a board this cartridge is not,
+/// and copying them would overflow the array.
+pub fn Cart::load_save(self : Cart, bytes : Bytes) -> Unit {
+  if !self.has_battery {
+    return
+  }
+  let count = if bytes.length() < self.prg_ram.length() {
+    bytes.length()
+  } else {
+    self.prg_ram.length()
+  }
+  for i in 0..<count {
+    self.prg_ram[i] = bytes.at(i)
+  }
+}
