@@ -96,7 +96,9 @@ reference trace is known to be a state difference and not a formatting one.
 | Four-screen mirroring with its own 4 KiB of nametable RAM | done |
 | Sprite-zero hit: opaque sprite pixel over opaque background pixel | done |
 | Mappers: MMC3, MMC5, VRC | planned |
-| APU: pulse, triangle, noise, DMC, frame sequencer | planned |
+| APU frame counter: 4-step and 5-step sequences, frame IRQ | done |
+| APU channel status and length counters, as `$4015` reports them | done |
+| APU: waveform synthesis and mixing | planned |
 | Sprite overflow flag | approximate |
 | PNG output of a finished frame, written out without a dependency | done |
 
@@ -134,6 +136,7 @@ cart.mbt         iNES parsing and the cartridge's memories
 mapper.mbt       bank switching: NROM, UxROM, CNROM, MMC1
 ppu.mbt          registers, rendering, sprites, palette and mirroring
 png.mbt          palette to RGB, and a dependency-free PNG writer
+apu.mbt          the frame counter and channel status registers
 bus.mbt          the console: address decoding, DMA, controllers
 cmd/main/        the CLI
 ```

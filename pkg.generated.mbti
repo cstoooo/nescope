@@ -33,6 +33,24 @@ pub fn NesError::to_string(Self) -> String
 pub impl Show for NesError
 
 // Types and methods
+pub(all) struct Apu {
+  mut mode : FrameMode
+  mut irq_inhibit : Bool
+  mut frame_irq : Bool
+  mut cycles : Int64
+  mut step : Int32
+  length : FixedArray[UInt32]
+  halt : FixedArray[Bool]
+  control : FixedArray[UInt32]
+  mut dmc_active : Bool
+  mut enabled_channels : UInt32
+}
+pub fn Apu::new() -> Self
+pub fn Apu::read_status(Self) -> UInt32
+pub fn Apu::tick(Self, Int64) -> Bool
+pub fn Apu::write_register(Self, UInt32, UInt32) -> Unit
+pub fn Apu::write_status(Self, UInt32) -> Unit
+
 pub(all) enum Button {
   A
   B
@@ -75,7 +93,10 @@ pub(all) struct Console {
   mut controllers : (UInt32, UInt32)
   mut controller_shift : (Int32, Int32)
   mut dma_cycles : Int64
+  mut apu : Apu
+  mut irq_pending : Bool
 }
+pub fn Console::irq(Self) -> Unit
 pub fn Console::new(Cart) -> Self
 pub fn Console::nmi(Self) -> Unit
 pub fn Console::read(Self, UInt32) -> UInt32
@@ -165,6 +186,19 @@ pub fn FlatRam::new() -> Self
 pub fn FlatRam::read(Self, UInt32) -> UInt32
 pub fn FlatRam::write(Self, UInt32, UInt32) -> Unit
 pub impl Bus for FlatRam
+
+pub(all) enum FrameMode {
+  FourStep
+  FiveStep
+}
+pub fn FrameMode::name(Self) -> String
+
+pub(all) enum FrameStep {
+  Idle
+  Quarter
+  Half
+  Both
+}
 
 pub(all) enum MapperKind {
   Nrom

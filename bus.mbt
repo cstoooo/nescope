@@ -30,6 +30,12 @@ pub(all) struct Console {
   mut controller_shift : (Int32, Int32)
   /// True while the CPU is stalled waiting for sprite DMA.
   mut dma_cycles : Int64
+  /// The audio unit. It does not synthesize sound here, but it owns the frame
+  /// counter, which is a CPU-visible timer.
+  mut apu : Apu
+  /// True when the APU's frame counter has raised an interrupt that the CPU has
+  /// not taken yet.
+  mut irq_pending : Bool
 }
 
 ///|
@@ -53,6 +59,8 @@ pub fn Console::new(cart : Cart) -> Console {
     controllers: (0U, 0U),
     controller_shift: (0, 0),
     dma_cycles: 0L,
+    apu: Apu::new(),
+    irq_pending: false,
   }
 }
 
@@ -70,10 +78,12 @@ pub fn Console::read(self : Console, address : UInt32) -> UInt32 {
     self.ram[offset % 0x800].to_int().reinterpret_as_uint() & 0xFF
   } else if offset < 0x4000 {
     self.ppu.read_register((offset - 0x2000).reinterpret_as_uint() & 0x07U)
-  } else if offset == 0x4015 {
-    // The APU status register; no audio yet, so it reads as zero rather than
-    // returning open bus, which some games would misread as a pending channel.
+  } else if offset >= 0x4000 && offset <= 0x4013 {
+    // The channel registers read back as open bus on the real hardware, which is
+    // effectively zero here.
     0U
+  } else if offset == 0x4015 {
+    self.apu.read_status()
   } else if offset == 0x4016 {
     self.read_controller(0)
   } else if offset == 0x4017 {
@@ -102,6 +112,10 @@ pub fn Console::write(self : Console, address : UInt32, value : UInt32) -> Unit 
     // from a page of memory into OAM. The extra cycle occurs when the source page
     // starts on an odd cycle, which this build does not model yet.
     self.sprite_dma(value)
+  } else if offset >= 0x4000 && offset <= 0x4013 {
+    self.apu.write_register((offset - 0x4000).reinterpret_as_uint(), value)
+  } else if offset == 0x4017 {
+    self.apu.write_register(0x17U, value)
   } else if offset == 0x4016 {
     self.strobe_controllers()
   } else if offset >= 0x4020 {
@@ -215,6 +229,12 @@ pub fn Console::step(self : Console) -> Bool raise NesError {
       started_vblank = true
     }
   }
+  // The APU counts CPU cycles, not dots, so it advances once per instruction
+  // rather than in the loop above.
+  let frame_interrupt = self.apu.tick(cycles)
+  if frame_interrupt {
+    self.irq_pending = true
+  }
   started_vblank && self.ppu.ctrl.nmi_enabled
 }
 
@@ -247,6 +267,27 @@ pub fn Console::nmi(self : Console) -> Unit {
 }
 
 ///|
+/// Takes a maskable interrupt through the vector at `$FFFE`.
+///
+/// The difference from `NMI` is more than the vector. Panning the pushed status:
+/// the hardware clears the break bit for both, but a maskable interrupt is also
+/// suppressed while the interrupt-disable flag is set, and an NMI is not. That
+/// distinction is what makes `SEI` a usable critical section.
+pub fn Console::irq(self : Console) -> Unit {
+  if self.cpu.flag(Interrupt) {
+    return
+  }
+  let ret = self.cpu.pc
+  self.cpu.push(self, (ret >> 8) & 0xFF)
+  self.cpu.push(self, ret & 0xFF)
+  self.cpu.push(self, (self.cpu.p | FLAG_UNUSED) & (FLAG_BREAK ^ 0xFFFF_FFFFU))
+  self.cpu.set_flag(Interrupt, true)
+  let low = self.cart_read(0xFFFEU)
+  let high = self.cart_read(0xFFFFU)
+  self.cpu.pc = low | (high << 8)
+}
+
+///|
 /// Runs until the PPU completes a frame, returning the number of CPU instructions
 /// executed.
 ///
@@ -263,6 +304,13 @@ pub fn Console::run_frame(
     let interrupt = self.step()
     if interrupt {
       self.nmi()
+    }
+    // The frame counter's interrupt is maskable, so it is checked after the
+    // instruction rather than delivered as part of it: a program that has run
+    // SEI must not be interrupted no matter how overdue the counter is.
+    if self.irq_pending {
+      self.irq_pending = false
+      self.irq()
     }
     executed = executed + 1
   }
