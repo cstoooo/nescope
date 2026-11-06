@@ -131,6 +131,12 @@ pub(all) enum MapperKind {
   /// MMC3 (mapper 4): eight bank registers selected by index, and a scanline
   /// counter driven by the PPU's A12 line that can interrupt the CPU mid-frame.
   Mmc3
+  /// AxROM (mapper 7): one register selects a 32 KiB program bank and the
+  /// single-screen nametable. No character banking at all.
+  AxRom
+  /// GxROM (mapper 66): one register, half of it a 32 KiB program bank and the
+  /// other half an 8 KiB character bank.
+  GxRom
   /// A mapper number this build has no wiring for; loading succeeds so the
   /// header can still be inspected, but running raises when the CPU first
   /// touches cartridge space.
@@ -353,6 +359,8 @@ pub fn MapperKind::name(self : MapperKind) -> String {
     Cnrom => "CNROM"
     Mmc1 => "MMC1"
     Mmc3 => "MMC3"
+    AxRom => "AxROM"
+    GxRom => "GxROM"
     Unsupported(number) => "mapper \{number} (unsupported)"
   }
 }

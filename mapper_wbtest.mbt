@@ -335,3 +335,71 @@ test "MMC3's mirroring register switches between the single-screen modes" {
   console.write(0xA000U, 0x01U)
   inspect_eq(console.cart.current_mirroring().name(), "single-screen high")
 }
+
+///|
+/// Builds a cartridge whose program ROM is divided into 32 KiB banks, each filled
+/// with its own bank number.
+fn synth_32k_rom(mapper : Int32, banks : Int32, chr_banks : Int32) -> Bytes {
+  let out = Buffer::Buffer(size_hint=16 + banks * 0x8000 + chr_banks * 0x2000)
+  out.write_byte(b'N')
+  out.write_byte(b'E')
+  out.write_byte(b'S')
+  out.write_byte(b'\x1A')
+  out.write_byte((banks * 2).reinterpret_as_uint().to_byte())
+  out.write_byte(chr_banks.reinterpret_as_uint().to_byte())
+  out.write_byte(((mapper & 0x0F) << 4).reinterpret_as_uint().to_byte())
+  out.write_byte((mapper & 0xF0).reinterpret_as_uint().to_byte())
+  for _ in 0..<8 {
+    out.write_byte(b'\x00')
+  }
+  for bank in 0..<banks {
+    for _ in 0..<0x8000 {
+      out.write_byte(bank.reinterpret_as_uint().to_byte())
+    }
+  }
+  for bank in 0..<chr_banks {
+    for _ in 0..<0x2000 {
+      out.write_byte((bank + 1).reinterpret_as_uint().to_byte())
+    }
+  }
+  out.to_bytes()
+}
+
+///|
+test "AxROM switches the whole 32 KiB window and the single-screen nametable" {
+  let console = Console::new(Cart::parse(synth_32k_rom(7, 4, 1)))
+  inspect_eq(console.cart.mapper.name(), "AxROM")
+  // Every address in the upper half follows the one register, because the board
+  // has no fixed window at all.
+  inspect_eq(console.read(0x8000U), 0U)
+  console.write(0x8000U, 2U)
+  inspect_eq(console.read(0x8000U), 2U)
+  inspect_eq(console.read(0xC000U), 2U)
+  inspect_eq(console.read(0xFFFCU), 2U)
+  // Bit 4 picks which of the two nametables both virtual tables show. A game
+  // flips it mid-frame to double its background space.
+  inspect_eq(console.cart.current_mirroring().name(), "single-screen low")
+  console.write(0x8000U, 0x12U)
+  inspect_eq(console.cart.current_mirroring().name(), "single-screen high")
+  // The program bank is still two, because the nametable bit is not part of it.
+  inspect_eq(console.read(0x8000U), 2U)
+}
+
+///|
+test "GxROM splits its one register between program and character banks" {
+  let console = Console::new(Cart::parse(synth_32k_rom(66, 4, 4)))
+  inspect_eq(console.cart.mapper.name(), "GxROM")
+  inspect_eq(console.read(0x8000U), 0U)
+  // The high nibble is the 32 KiB program bank and the low two bits the 8 KiB
+  // character bank, so a write of $21 selects program bank two and character
+  // bank one.
+  console.write(0x8000U, 0x21U)
+  inspect_eq(console.read(0x8000U), 2U)
+  inspect_eq(console.read(0xC000U), 2U)
+  inspect_eq(console.cart.chr_bank, 1L)
+  // Character bank one holds the value two, because this builder numbers banks
+  // from one.
+  console.ppu.v = 0x0000U
+  ignore(console.ppu.read_register(0x07U))
+  inspect_eq(console.ppu.read_register(0x07U), 2U)
+}

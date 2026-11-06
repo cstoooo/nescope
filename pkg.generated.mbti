@@ -223,6 +223,8 @@ pub(all) enum MapperKind {
   Cnrom
   Mmc1
   Mmc3
+  AxRom
+  GxRom
   Unsupported(UInt32)
 }
 pub fn MapperKind::name(Self) -> String

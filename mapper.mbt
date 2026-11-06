@@ -21,6 +21,8 @@ fn mapper_of(number : Int32) -> MapperKind {
     2 => UxRom
     3 => Cnrom
     4 => Mmc3
+    7 => AxRom
+    66 => GxRom
     _ => Unsupported(number.reinterpret_as_uint())
   }
 }
@@ -134,6 +136,33 @@ fn Cart::read_prg(self : Cart, address : UInt32) -> UInt32 {
       }
       let within = (address & 0x1FFFU).reinterpret_as_int().to_int64()
       self.prg_byte(bank % count * small + within)
+    }
+    AxRom => {
+      // A single 32 KiB bank fills the whole upper half, so the 16 KiB window
+      // trick the earlier boards use does not apply: the offset has to be
+      // rebuilt against the whole 32 KiB.
+      let count = self.prg.length().to_int64() / 0x8000L
+      if count <= 0L {
+        0U
+      } else {
+        let bank = self.prg_bank % count
+        self.prg_byte(
+          bank * 0x8000L + (address & 0x7FFFU).reinterpret_as_int().to_int64(),
+        )
+      }
+    }
+    GxRom => {
+      // The same 32 KiB arrangement, with the character bank in the same
+      // register.
+      let count = self.prg.length().to_int64() / 0x8000L
+      if count <= 0L {
+        0U
+      } else {
+        let bank = self.prg_bank % count
+        self.prg_byte(
+          bank * 0x8000L + (address & 0x7FFFU).reinterpret_as_int().to_int64(),
+        )
+      }
     }
     Unsupported(_) => 0U
   }
@@ -273,6 +302,34 @@ fn Cart::write_mapper(self : Cart, address : UInt32, value : UInt32) -> Bool {
       }
       true
     }
+    AxRom => {
+      // Seven bits select the 32 KiB bank and bit 4 picks the single-screen
+      // nametable. The bit that would be the character bank on a GxROM board is
+      // part of the program bank here, which is why the two cannot share a
+      // decoder despite both filling a 32 KiB window.
+      let count = self.prg.length().to_int64() / 0x8000L
+      if count > 0L {
+        self.prg_bank = (value & 0x07U).reinterpret_as_int().to_int64() % count
+      }
+      self.mirroring_from_mapper = true
+      self.control = (value >> 4) & 0x01U
+      true
+    }
+    GxRom => {
+      // Four bits of program bank and two of character bank in one register.
+      // The program side counts 32 KiB banks, so the field is the high nibble
+      // and the value is used whole rather than shifted down.
+      let prg = self.prg.length().to_int64() / 0x8000L
+      if prg > 0L {
+        self.prg_bank = ((value >> 4) & 0x03U).reinterpret_as_int().to_int64() %
+          prg
+      }
+      let chr = self.chr.length().to_int64() / 0x2000L
+      if chr > 0L {
+        self.chr_bank = (value & 0x03U).reinterpret_as_int().to_int64() % chr
+      }
+      true
+    }
     Unsupported(_) => false
   }
 }
@@ -291,7 +348,14 @@ fn Cart::current_mirroring(self : Cart) -> Mirroring {
   // screen boards ignore the register entirely because their extra RAM is
   // already wired to all four tables.
   match self.mapper {
-    Mmc3 => if (self.control & 0x01U) == 0U { SingleLow } else { SingleHigh }
+    // AxROM's nametable bit means the same thing as MMC3's: zero shows the first
+    // page in both tables, one shows the second.
+    AxRom | Mmc3 =>
+      if (self.control & 0x01U) == 0U {
+        SingleLow
+      } else {
+        SingleHigh
+      }
     Mmc1 =>
       match (self.control & 0x03U).reinterpret_as_int() {
         0 => SingleLow

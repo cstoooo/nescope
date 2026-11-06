@@ -90,13 +90,15 @@ reference trace is known to be a state difference and not a formatting one.
 | CNROM (mapper 3): switchable character bank | done |
 | MMC1 (mapper 1): serial shift register, four bank arrangements, run-time mirroring | done |
 | MMC3 (mapper 4): two switchable 8 KiB windows, 1 KiB character banking, scanline IRQ | done |
+| AxROM (mapper 7): one 32 KiB window and a single-screen nametable bit | done |
+| GxROM (mapper 66): one register shared between program and character banks | done |
 | PPU registers, read buffer, scroll latch, palette mirrors | done |
 | PPU: per-pixel background and sprite rendering | done |
 | Sprite DMA through `$4014` with the odd-cycle stall | done |
 | Controller shift registers in hardware order | done |
 | Four-screen mirroring with its own 4 KiB of nametable RAM | done |
 | Sprite-zero hit: opaque sprite pixel over opaque background pixel | done |
-| Mappers: MMC5, VRC, and the discrete boards (AxROM, GxROM, MMC2) | planned |
+| Mappers: MMC5, VRC, MMC2 and the other discrete boards | planned |
 | APU frame counter: 4-step and 5-step sequences, frame IRQ | done |
 | APU channel status and length counters, as `$4015` reports them | done |
 | APU: waveform synthesis and mixing | planned |
