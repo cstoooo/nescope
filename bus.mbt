@@ -263,6 +263,14 @@ pub fn Console::set_buttons(
 /// Returns true when the instruction's final cycle raised the PPU's vblank and the
 /// control register has NMI enabled, so the caller can service the interrupt.
 pub fn Console::step(self : Console) -> Bool raise NesError {
+  // A cartridge whose mapper this build has no wiring for would otherwise run
+  // against a window of zeroes and die somewhere unrelated, with an "unknown
+  // opcode $00" that says nothing about the real cause. Refusing at the first
+  // instruction names the board instead.
+  match self.cart.mapper {
+    Unsupported(number) => raise UnsupportedMapper(number~)
+    _ => ()
+  }
   let result = self.cpu.step(self)
   let mut cycles = result.cycles
   if self.dma_cycles > 0L {

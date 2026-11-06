@@ -478,3 +478,21 @@ test "save loading tolerates files of the wrong size" {
   inspect_eq(console.read(0x6000U), 0x7FU)
   inspect_eq(console.read(0x7FFFU), 0x7FU)
 }
+
+///|
+/// A cartridge whose mapper this build has no wiring for must refuse to run, and
+/// say which board it is. Silently reading zeroes would fail later as an unknown
+/// opcode, a message that points at the CPU when the real cause is the cartridge.
+test "an unsupported mapper fails at the first instruction and names itself" {
+  // Mapper 5 is MMC5, which is not implemented.
+  let cart = Cart::parse(synth_rom(5, 1, 1)) catch { _ => fail("parse") }
+  // Parsing succeeds, so the header can still be inspected.
+  inspect_eq(cart.mapper.name(), "mapper 5 (unsupported)")
+  let console = Console::new(cart)
+  let outcome = Ok(console.step()) catch { e => Err(e) }
+  match outcome {
+    Err(UnsupportedMapper(number~)) => inspect_eq(number, 5U)
+    Err(_) => fail("expected UnsupportedMapper, got a different error")
+    Ok(_) => fail("expected UnsupportedMapper")
+  }
+}
