@@ -16,17 +16,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Installed from the official script rather than a marketplace action so
+      # that the workflow depends only on the toolchain's own release channel.
       - name: Install MoonBit
-        uses: moonbit-community/setup-moonbit@v1
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> $GITHUB_PATH
 
       - name: Toolchain versions
         run: |
           moon version --all
 
+      - name: Update dependencies
+        run: moon update
+
       - name: Format check
-        run: |
-          moon fmt
-          git diff --exit-code
+        run: moon fmt --check
 
       - name: Type check with warnings denied
         run: moon check --deny-warn
