@@ -117,6 +117,7 @@ reference trace is known to be a state difference and not a formatting one.
 | Four-screen mirroring with its own 4 KiB of nametable RAM | done |
 | Sprite-zero hit: opaque sprite pixel over opaque background pixel | done |
 | Mappers: MMC5, VRC, MMC2 and the other discrete boards | planned |
+| An unimplemented mapper refuses to run and names its board number | done |
 | APU frame counter: 4-step and 5-step sequences, frame IRQ | done |
 | APU channel status and length counters, as `$4015` reports them | done |
 | APU: pulse and triangle oscillators, duty sequences, length-driven silencing | done |
