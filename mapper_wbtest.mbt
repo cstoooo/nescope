@@ -205,3 +205,133 @@ test "NROM ignores mapper writes" {
   inspect_eq(console.read(0x8000U), 0U)
   inspect_eq(console.read(0xC000U), 1U)
 }
+
+///|
+/// Builds a cartridge whose character ROM is filled with the 1 KiB page number,
+/// so a fetch says exactly which page answered. MMC3 is the first board here
+/// whose character banking is finer than 8 KiB, and a page-numbered ROM is the
+/// only way to see that the fine banking actually works.
+fn synth_mmc3(chr_pages : Int32) -> Bytes {
+  let out = Buffer::Buffer(size_hint=16 + 0x2000 * 8 + chr_pages * 0x400)
+  out.write_byte(b'N')
+  out.write_byte(b'E')
+  out.write_byte(b'S')
+  out.write_byte(b'\x1A')
+  // The header counts 16 KiB program banks; eight of them is 64 KiB, which MMC3
+  // addresses as sixteen 8 KiB windows.
+  out.write_byte(b'\x04')
+  // The header counts 8 KiB character banks, not 1 KiB pages, so a page count
+  // has to be divided before it is written.
+  out.write_byte((chr_pages / 8).reinterpret_as_uint().to_byte())
+  out.write_byte(b'\x40')
+  out.write_byte(b'\x00')
+  for _ in 0..<8 {
+    out.write_byte(b'\x00')
+  }
+  // Each 8 KiB window is filled with its own window number, so a read says
+  // exactly which window answered rather than requiring the test to know the
+  // ROM's contents.
+  for window in 0..<8 {
+    for _ in 0..<0x2000 {
+      out.write_byte(window.reinterpret_as_uint().to_byte())
+    }
+  }
+  for page in 0..<chr_pages {
+    for _ in 0..<0x400 {
+      out.write_byte(page.reinterpret_as_uint().to_byte())
+    }
+  }
+  out.to_bytes()
+}
+
+///|
+test "MMC3 switches the two 8 KiB program windows independently" {
+  let console = Console::new(Cart::parse(synth_mmc3(8)))
+  inspect_eq(console.cart.mapper.name(), "MMC3")
+  // Register 6 drives $8000 and register 7 drives $A000; $C000 and $E000 are
+  // pinned to the last two banks. Each program bank here is 8 KiB, and every
+  // byte of it holds the bank number, so the read says which answered.
+  console.write(0x8000U, 0x06U)
+  console.write(0x8001U, 0x03U)
+  inspect_eq(console.read(0x8000U), 3U)
+  console.write(0x8000U, 0x07U)
+  console.write(0x8001U, 0x05U)
+  inspect_eq(console.read(0xA000U), 5U)
+  // The pinned windows are the last two of the eight: windows 6 and 7.
+  inspect_eq(console.read(0xC000U), 6U)
+  inspect_eq(console.read(0xE000U), 7U)
+}
+
+///|
+test "MMC3's mode bit swaps the program windows" {
+  let console = Console::new(Cart::parse(synth_mmc3(8)))
+  console.write(0x8000U, 0x06U)
+  console.write(0x8001U, 0x02U)
+  inspect_eq(console.read(0x8000U), 2U)
+  inspect_eq(console.read(0xC000U), 6U)
+  // Setting bit 6 of the bank-select register swaps which pair follows the
+  // registers, which is how a game moves its own fixed code.
+  console.write(0x8000U, 0x46U)
+  inspect_eq(console.read(0x8000U), 6U)
+  inspect_eq(console.read(0xC000U), 2U)
+}
+
+///|
+test "MMC3 selects character banks at 1 KiB granularity" {
+  let console = Console::new(Cart::parse(synth_mmc3(8)))
+  // In the default arrangement the first 4 KiB of the pattern space is driven by
+  // registers 0 and 1 as 2 KiB windows, and only the second 4 KiB is driven by
+  // the four 1 KiB registers. Register 2 therefore covers $1000, not $0000.
+  console.write(0x8000U, 0x02U)
+  console.write(0x8001U, 0x05U)
+  // The data port is buffered, so two reads are needed to see the fetched byte.
+  console.ppu.v = 0x1000U
+  ignore(console.ppu.read_register(0x07U))
+  inspect_eq(console.ppu.read_register(0x07U), 5U)
+  // Changing register 2 must change that byte, which proves the page table is
+  // being refreshed on a mapper write rather than cached at construction.
+  console.write(0x8001U, 0x06U)
+  console.ppu.v = 0x1000U
+  ignore(console.ppu.read_register(0x07U))
+  inspect_eq(console.ppu.read_register(0x07U), 6U)
+  // Flipping the mode bit swaps the halves, so register 2 now covers $0000.
+  console.write(0x8000U, 0x80U)
+  console.ppu.v = 0x0000U
+  ignore(console.ppu.read_register(0x07U))
+  inspect_eq(console.ppu.read_register(0x07U), 6U)
+}
+
+///|
+test "MMC3's scanline counter interrupts after the latched number of lines" {
+  let console = Console::new(Cart::parse(synth_mmc3(8)))
+  // Latch a count, clear the counter, then arm it. The order matters: $C001
+  // clears without reloading, so the first interval is the latch rather than
+  // zero, which is what a game relies on to get its first split in the right
+  // place.
+  console.write(0xC000U, 3U)
+  console.write(0xC001U, 0U)
+  console.write(0xE001U, 0U)
+  inspect_bool(console.cart.irq_enabled, true)
+  // Three edges must not have fired yet; the fourth is where the counter hits
+  // zero.
+  for _ in 0..<3 {
+    console.cart.clock_scanline()
+  }
+  inspect_bool(console.cart.irq_line, false)
+  console.cart.clock_scanline()
+  inspect_bool(console.cart.irq_line, true)
+  // Disarming clears the pending line, which is how a game stops the interrupt
+  // once it has finished the split.
+  console.write(0xE000U, 0U)
+  inspect_bool(console.cart.irq_line, false)
+}
+
+///|
+test "MMC3's mirroring register switches between the single-screen modes" {
+  let console = Console::new(Cart::parse(synth_mmc3(8)))
+  // Bit 0 of a write to $A000 picks which page both nametables show.
+  console.write(0xA000U, 0x00U)
+  inspect_eq(console.cart.current_mirroring().name(), "single-screen low")
+  console.write(0xA000U, 0x01U)
+  inspect_eq(console.cart.current_mirroring().name(), "single-screen high")
+}

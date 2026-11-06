@@ -155,6 +155,13 @@ pub(all) struct Ppu {
   mut chr : FixedArray[Byte]
   /// True when the cartridge's character memory is RAM and accepts writes.
   mut chr_ram : Bool
+  /// How many scanlines the raster has completed since the counter was last
+  /// read.
+  ///
+  /// The board's scanline counter watches the PPU's A12 line and cannot see the
+  /// raster directly, so the console reports edges rather than lines; counting
+  /// completed scanlines here is the same signal with less plumbing.
+  mut scanlines : UInt32
   /// Which 8 KiB character bank the mapper currently has selected.
   ///
   /// Kept here rather than read from the cartridge on every fetch because a
@@ -162,6 +169,14 @@ pub(all) struct Ppu {
   /// hundreds of times per scanline; the console refreshes this whenever a
   /// mapper write changes it.
   mut chr_bank : Int64
+  /// Per-1 KiB page numbers for the eight pages of the 8 KiB pattern space.
+  ///
+  /// Coarse boards fill this with the one bank they have selected; MMC3 fills it
+  /// page by page from its six character registers. The PPU uses it whenever it
+  /// is present, because a pattern fetch is the hottest path in the whole
+  /// emulator and resolving a mapper's register layout per fetch would cost more
+  /// than the fetch.
+  mut chr_pages : FixedArray[Int64]?
   /// The offset `$2003` last wrote, used by direct OAM access.
   mut oam_addr : UInt32
 }
@@ -212,6 +227,8 @@ pub fn Ppu::new() -> Ppu {
     chr: FixedArray::make(0x2000, b'\x00'),
     chr_ram: false,
     chr_bank: 0L,
+    chr_pages: None,
+    scanlines: 0U,
     oam_addr: 0,
   }
 }
@@ -315,6 +332,10 @@ pub fn Ppu::tick(self : Ppu) -> Bool {
   if self.dot >= DOTS_PER_SCANLINE {
     self.dot = 0
     self.scanline = self.scanline + 1
+    // A scanline is one A12 rising edge for a board that counts them: the fetch
+    // pattern is the same on every line, so the line boundary is a faithful
+    // stand-in and costs one increment instead of tracking the bus.
+    self.scanlines = self.scanlines + 1U
     if self.scanline == VBLANK_START {
       self.status.vblank = true
       started_vblank = true
@@ -541,6 +562,20 @@ fn Ppu::chr_byte(self : Ppu, offset : Int32) -> UInt32 {
   let size = self.chr.length()
   if size <= 0 {
     return 0U
+  }
+  // A board with 1 KiB granularity hands over a page table; using it here keeps
+  // the mapper's register layout out of the fetch path.
+  match self.chr_pages {
+    Some(pages) => {
+      let page = offset % 0x2000 / 0x400
+      let bank = pages[page].to_int()
+      let within = offset % 0x400
+      return self.chr[(bank * 0x400 + within) % size]
+        .to_int()
+        .reinterpret_as_uint() &
+        0xFF
+    }
+    None => ()
   }
   // Pattern tables are 8 KiB, and a board with more than one of them answers a
   // fetch from whichever bank its register currently selects. Adding the bank

@@ -79,6 +79,14 @@ pub(all) struct Cart {
   mut shift_count : UInt32
   mut control : UInt32
   mut mirroring_from_mapper : Bool
+  mut bank_registers : FixedArray[Int64]
+  mut bank_select : UInt32
+  mut prg_mode : Bool
+  mut chr_mode : Bool
+  mut irq_counter : UInt32
+  mut irq_latch : UInt32
+  mut irq_line : Bool
+  mut irq_enabled : Bool
 }
 pub fn Cart::chr_byte(Self, Int64) -> UInt32
 pub fn Cart::parse(Bytes) -> Self raise NesError
@@ -205,6 +213,7 @@ pub(all) enum MapperKind {
   UxRom
   Cnrom
   Mmc1
+  Mmc3
   Unsupported(UInt32)
 }
 pub fn MapperKind::name(Self) -> String
@@ -254,7 +263,9 @@ pub(all) struct Ppu {
   mut mirroring : Mirroring
   mut chr : FixedArray[Byte]
   mut chr_ram : Bool
+  mut scanlines : UInt32
   mut chr_bank : Int64
+  mut chr_pages : FixedArray[Int64]?
   mut oam_addr : UInt32
 }
 pub fn Ppu::new() -> Self

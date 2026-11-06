@@ -85,6 +85,28 @@ pub(all) struct Cart {
   /// Set once the CPU has written to MMC1's control register, after which the
   /// header's mirroring value no longer applies.
   mut mirroring_from_mapper : Bool
+  /// MMC3's eight bank registers, in the order they are written: two 2 KiB
+  /// character banks, four 1 KiB character banks, then two 8 KiB program banks.
+  ///
+  /// They are kept as written rather than decoded into a single bank number
+  /// because which window each one drives depends on a separate mode bit, and a
+  /// program can flip that bit without rewriting them.
+  mut bank_registers : FixedArray[Int64]
+  /// MMC3's bank-select register: which of the eight the next write targets.
+  mut bank_select : UInt32
+  /// MMC3's program and character bank arrangement bit, which swaps the two
+  /// halves of each address space.
+  mut prg_mode : Bool
+  mut chr_mode : Bool
+  /// MMC3's scanline counter, loaded with the value a program writes and
+  /// decremented on each A12 rising edge.
+  mut irq_counter : UInt32
+  mut irq_latch : UInt32
+  /// True once the counter has reached zero and the interrupt is asserted.
+  mut irq_line : Bool
+  /// True when the counter reloads itself on reaching zero, which is how a game
+  /// gets an interrupt on every scanline band rather than once.
+  mut irq_enabled : Bool
 }
 
 ///|
@@ -106,6 +128,9 @@ pub(all) enum MapperKind {
   /// MMC1 (mapper 1): a serial shift register loads five registers, so a program
   /// has to write one bit at a time across five stores.
   Mmc1
+  /// MMC3 (mapper 4): eight bank registers selected by index, and a scanline
+  /// counter driven by the PPU's A12 line that can interrupt the CPU mid-frame.
+  Mmc3
   /// A mapper number this build has no wiring for; loading succeeds so the
   /// header can still be inspected, but running raises when the CPU first
   /// touches cartridge space.
@@ -215,6 +240,14 @@ pub fn Cart::parse(bytes : Bytes) -> Cart raise NesError {
     // to the last bank and reset code can bank-switch without losing itself.
     control: 0x0CU,
     mirroring_from_mapper: false,
+    bank_registers: FixedArray::make(8, 0L),
+    bank_select: 0U,
+    prg_mode: false,
+    chr_mode: false,
+    irq_counter: 0U,
+    irq_latch: 0U,
+    irq_line: false,
+    irq_enabled: false,
   }
 }
 
@@ -319,6 +352,7 @@ pub fn MapperKind::name(self : MapperKind) -> String {
     UxRom => "UxROM"
     Cnrom => "CNROM"
     Mmc1 => "MMC1"
+    Mmc3 => "MMC3"
     Unsupported(number) => "mapper \{number} (unsupported)"
   }
 }

@@ -51,6 +51,7 @@ pub fn Console::new(cart : Cart) -> Console {
   ppu.chr = chr
   ppu.chr_ram = cart.chr_ram
   ppu.chr_bank = cart.chr_bank
+  ppu.chr_pages = cart.chr_pages()
   {
     cpu,
     ppu,
@@ -139,7 +140,12 @@ pub fn Console::write(self : Console, address : UInt32, value : UInt32) -> Unit 
     // PPU's cached copies have to be refreshed afterwards.
     if self.cart.write_mapper(at, value) {
       self.ppu.chr_bank = self.cart.chr_bank
+      self.ppu.chr_pages = self.cart.chr_pages()
       self.ppu.mirroring = self.cart.current_mirroring()
+      // MMC3's scanline counter is armed and disarmed by the same writes that
+      // change its banks, so the console has to re-read the line state after
+      // every mapper write rather than only after the PPU advances.
+      self.irq_pending = self.irq_pending || self.cart.irq_line
     }
   }
 }
@@ -241,6 +247,18 @@ pub fn Console::step(self : Console) -> Bool raise NesError {
     if self.ppu.tick() {
       started_vblank = true
     }
+  }
+  // The board's scanline counter watches the same line boundaries the PPU just
+  // crossed, so edges are delivered after the dots rather than polled from the
+  // mapper every cycle.
+  let mut edges = self.ppu.scanlines
+  self.ppu.scanlines = 0U
+  while edges > 0U {
+    self.cart.clock_scanline()
+    if self.cart.irq_line {
+      self.irq_pending = true
+    }
+    edges = edges - 1U
   }
   // The APU counts CPU cycles, not dots, so it advances once per instruction
   // rather than in the loop above.
