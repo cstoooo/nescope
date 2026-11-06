@@ -184,7 +184,10 @@ pub fn Ppu::new() -> Ppu {
     t: 0,
     fine_x: 0,
     write_latch: false,
-    nt_ram: FixedArray::make(0x800, b'\x00'),
+    // Four KiB, not two: four-screen mirroring gives each virtual table its own
+    // page, and the extra pages live on the cartridge rather than in the PPU.
+    // Allocating only two would make table 2 and 3 read past the end of the array.
+    nt_ram: FixedArray::make(0x1000, b'\x00'),
     palette: FixedArray::make(32, b'\x00'),
     oam: FixedArray::make(256, b'\x00'),
     read_buffer: 0,
@@ -232,23 +235,21 @@ fn Ppu::background_pixel(self : Ppu, x : Int32, _y : Int32) -> BackgroundPixel {
   if hidden {
     return { colour: backdrop, covered: false, }
   }
-  let scroll_x = (self.v & 0x1F).reinterpret_as_int() * 8 +
-    self.fine_x.reinterpret_as_int()
-  let table_x = scroll_x / 256 % 2
-  let name_x = scroll_x % 256 / 8
+  // `v` already encodes the whole position: coarse X, coarse Y, the fine Y scroll
+  // and both nametable-select bits. Rebuilding a pixel offset from them and then
+  // re-adding the base nametable double-counts the table select, because the base
+  // is already folded into bit 10 and bit 11 of `v`.
+  let table_x = (self.v >> 10) & 0x03
+  let name_x = (self.v & 0x1F).reinterpret_as_int()
   let name_y = ((self.v >> 5) & 0x1F).reinterpret_as_int()
-  let tile = self.nametable_byte(
-    self.ctrl.nametable | table_x.reinterpret_as_uint(),
-    name_x,
-    name_y,
-  )
+  let tile = self.nametable_byte(table_x, name_x, name_y)
   let fine_y = ((self.v >> 12) & 0x07).reinterpret_as_int()
   let row = self.pattern_row(
     tile,
     fine_y.reinterpret_as_uint(),
     self.ctrl.background_pattern,
   )
-  let bit = 7 - scroll_x % 8
+  let bit = 7 - self.fine_x.reinterpret_as_int()
   // A background pixel is one bit from the low plane: its colour is always 0 or 1,
   // never 2 or 3. Reading the joined word without masking would pick up the high
   // plane's bit and produce colours the background layer cannot show.
@@ -257,11 +258,7 @@ fn Ppu::background_pixel(self : Ppu, x : Int32, _y : Int32) -> BackgroundPixel {
   if pixel == 0 {
     return { colour: backdrop, covered: false, }
   }
-  let attr = self.attribute_byte(
-    self.ctrl.nametable | table_x.reinterpret_as_uint(),
-    name_x,
-    name_y,
-  )
+  let attr = self.attribute_byte(table_x, name_x, name_y)
   let high_bits : Int32 = name_y % 4 / 2 * 2 + name_x % 4 / 2
   let palette_index = (attr >> (high_bits * 2)) & 0x03U
   {

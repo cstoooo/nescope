@@ -407,3 +407,70 @@ test "background walks the nametable so each quadrant gets its own palette" {
   inspect_at("mid-left", at(100, 100).to_int() & 0xFF, 0x2A)
   inspect_at("mid-right", at(200, 100).to_int() & 0xFF, 0x16)
 }
+
+///|
+/// Four-screen mirroring gives each virtual table its own page, which needs four
+/// KiB of nametable RAM on the cartridge. Two would put tables 2 and 3 past the
+/// end of the array, so a write to the far table would either be dropped or read
+/// back as garbage.
+test "four-screen mirroring keeps all four virtual tables separate" {
+  let ppu = Ppu::new()
+  ppu.mirroring = FourScreen
+  for table in 0..<4 {
+    ppu.write_register(
+      0x06U,
+      (0x2000U + 0x400U * table.reinterpret_as_uint()) >> 8,
+    )
+    ppu.write_register(0x06U, 0x00U)
+    ppu.write_register(0x07U, 0x10U * table.reinterpret_as_uint())
+  }
+  for table in 0..<4 {
+    ignore(ppu.read_register(0x07U))
+    ppu.write_register(
+      0x06U,
+      (0x2000U + 0x400U * table.reinterpret_as_uint()) >> 8,
+    )
+    ppu.write_register(0x06U, 0x00U)
+    ignore(ppu.read_register(0x07U))
+    inspect_at(
+      "table \{table}",
+      ppu.read_register(0x07U).reinterpret_as_int(),
+      0x10 * table,
+    )
+  }
+}
+
+///|
+/// A tile's tile index and attribute palette both come from the table bit 10 and
+/// bit 11 of `v` select, so a scroll that crosses into the second nametable has to
+/// switch pages rather than keep reading the first.
+test "crossing into the second nametable switches pages" {
+  let ppu = Ppu::new()
+  ppu.mirroring = Vertical
+  // Table 0 holds tile 1, table 1 holds tile 2, both with an opaque row.
+  ppu.nt_ram[0x000] = b'\x01'
+  ppu.nt_ram[0x400] = b'\x02'
+  // Table 1's attribute table selects palette 1 for every quadrant, so its tile
+  // must come out in a different colour than table 0's.
+  ppu.nt_ram[0x400 + 0x3C0] = b'\x55'
+  for row in 0..<8 {
+    ppu.chr[16 + row] = b'\xFF'
+    ppu.chr[32 + row] = b'\xFF'
+  }
+  ppu.set_palette_byte(0x00U, 0x0FU)
+  ppu.set_palette_byte(0x01U, 0x2AU)
+  ppu.set_palette_byte(0x05U, 0x16U)
+  ppu.mask.show_background = true
+  ppu.mask.show_background_left = true
+  // Start the raster in table 0 and render one pixel.
+  ppu.v = 0x2000U
+  ppu.t = 0x2000U
+  ignore(ppu.tick())
+  let left = ppu.frame[0].to_int() & 0xFF
+  // Move v into table 1 and render the same position again.
+  ppu.v = 0x2400U
+  ignore(ppu.tick())
+  let right = ppu.frame[1].to_int() & 0xFF
+  inspect_at("table 0", left, 0x2A)
+  inspect_at("table 1", right, 0x16)
+}
