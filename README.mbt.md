@@ -102,6 +102,7 @@ reference trace is known to be a state difference and not a formatting one.
 | APU: waveform synthesis and mixing | planned |
 | Sprite overflow flag | approximate |
 | PNG output of a finished frame, written out without a dependency | done |
+| Disassembly of all 151 official opcodes, in reference-log format | done |
 
 ## How it is tested
 
@@ -137,6 +138,7 @@ cart.mbt         iNES parsing and the cartridge's memories
 mapper.mbt       bank switching: NROM, UxROM, CNROM, MMC1
 ppu.mbt          registers, rendering, sprites, palette and mirroring
 png.mbt          palette to RGB, and a dependency-free PNG writer
+disasm.mbt       the opcode table and its rendering, for trace output
 apu.mbt          the frame counter and channel status registers
 bus.mbt          the console: address decoding, DMA, controllers
 cmd/main/        the CLI

@@ -6,6 +6,8 @@ pub const SCREEN_HEIGHT : Int32 = 240
 
 pub const SCREEN_WIDTH : Int32 = 256
 
+pub fn decode(UInt32) -> Decoded?
+
 pub fn encode_png(FixedArray[Byte]) -> Bytes
 
 pub fn hex2(UInt32) -> String
@@ -17,6 +19,8 @@ pub fn hex8(UInt32) -> String
 pub fn nes_colour(UInt32) -> (UInt32, UInt32, UInt32)
 
 pub fn peek(&Bus, UInt32) -> UInt32
+
+pub fn render(Decoded, UInt32) -> String
 
 // Errors
 pub(all) suberror NesError {
@@ -173,6 +177,11 @@ pub(all) struct Ctrl {
   mut nmi_enabled : Bool
 }
 
+pub(all) struct Decoded {
+  mnemonic : String
+  mode : Mode
+}
+
 pub(all) enum Flag {
   Carry
   Zero
@@ -243,6 +252,23 @@ pub(all) enum Mirroring {
   FourScreen
 }
 pub fn Mirroring::name(Self) -> String
+
+pub(all) enum Mode {
+  Implied
+  Accumulator
+  Immediate
+  ZeroPage
+  ZeroPageX
+  ZeroPageY
+  Absolute
+  AbsoluteX
+  AbsoluteY
+  Indirect
+  IndexedIndirect
+  IndirectIndexed
+  Relative
+}
+pub fn Mode::operand_bytes(Self) -> Int32
 
 pub(all) struct Ppu {
   ctrl : Ctrl

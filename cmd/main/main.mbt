@@ -176,11 +176,56 @@ fn trace(args : Array[String]) -> Unit {
       return
     }
   }
-  let ram = @lib.FlatRam::new()
-  ram.load(0xC000, image)
-  let cpu = @lib.Cpu::new()
-  cpu.pc = start
-  run_trace(cpu, ram, limit)
+  // A .nes image is a cartridge, not a flat binary: feeding one to the flat-RAM
+  // loader puts the sixteen-byte header where the first instruction should be,
+  // and the trace then disassembles "NES" as an instruction. Any file that
+  // starts with the iNES magic goes through the cartridge path instead, which
+  // also means its banking applies to the operand bytes.
+  if is_ines(image) {
+    let cart = @lib.Cart::parse(image) catch {
+      e => {
+        println("nescope: \{path}: \{e.to_string()}")
+        return
+      }
+    }
+    let console = @lib.Console::new(cart)
+    run_console_trace(console, limit)
+  } else {
+    let ram = @lib.FlatRam::new()
+    ram.load(0xC000, image)
+    let cpu = @lib.Cpu::new()
+    cpu.pc = start
+    run_trace(cpu, ram, limit)
+  }
+}
+
+///|
+/// True when a file starts with the iNES magic.
+fn is_ines(image : Bytes) -> Bool {
+  image.length() >= 4 &&
+  image.at(0).to_int() == 0x4E &&
+  image.at(1).to_int() == 0x45 &&
+  image.at(2).to_int() == 0x53 &&
+  image.at(3).to_int() == 0x1A
+}
+
+///|
+/// Executes up to `limit` instructions of a cartridge, printing the state before
+/// each one.
+fn run_console_trace(console : @lib.Console, limit : Int64) -> Unit {
+  let mut n = 0L
+  while n < limit {
+    println(format_line(console.cpu, console, console.cpu.pc))
+    let outcome = Ok(console.step()) catch { e => Err(e) }
+    match outcome {
+      Ok(_) => ()
+      Err(e) => {
+        println("stopped: \{e.to_string()}")
+        return
+      }
+    }
+    n = n + 1L
+  }
 }
 
 ///|
@@ -188,8 +233,7 @@ fn trace(args : Array[String]) -> Unit {
 fn run_trace(cpu : @lib.Cpu, ram : @lib.FlatRam, limit : Int64) -> Unit {
   let mut n = 0L
   while n < limit {
-    let opcode = @lib.peek(ram, cpu.pc)
-    println(format_line(cpu, opcode))
+    println(format_line(cpu, ram, cpu.pc))
     let outcome = Ok(cpu.step(ram)) catch { e => Err(e) }
     match outcome {
       Ok(_) => ()
@@ -203,23 +247,69 @@ fn run_trace(cpu : @lib.Cpu, ram : @lib.FlatRam, limit : Int64) -> Unit {
 }
 
 ///|
-/// Renders one trace line: program counter, opcode byte, mnemonic placeholder and
-/// the register columns.
+/// Renders one trace line: program counter, the instruction's bytes, its
+/// disassembly and the register columns.
 ///
-/// The operand bytes and mnemonic are not yet decoded: this build reports the
-/// opcode byte alone rather than inventing a disassembly, so that a column that
-/// disagrees with a reference log is known to be a state difference and not a
-/// formatting difference.
-fn format_line(cpu : @lib.Cpu, opcode : UInt32) -> String {
-  let pc = hex4(cpu.pc)
-  let op = hex2(opcode)
+/// The layout matches the reference logs so that a line-by-line diff points at a
+/// state difference rather than at formatting. That also means the operand bytes
+/// have to be shown even when the opcode is undocumented and has no mnemonic: an
+/// unnamed instruction still has a known length, and leaving its bytes blank
+/// would shift every following column.
+fn format_line(cpu : @lib.Cpu, bus : &@lib.Bus, address : UInt32) -> String {
+  let opcode = @lib.peek(bus, address)
+  let decoded = @lib.decode(opcode)
+  // The operand bytes, read through the bus so a cartridge's banking applies,
+  // and the target a branch reaches.
+  let operand = match decoded {
+    Some(d) =>
+      match d.mode.operand_bytes() {
+        0 => 0U
+        1 => @lib.peek(bus, address + 1U)
+        _ => @lib.peek(bus, address + 1U) | (@lib.peek(bus, address + 2U) << 8)
+      }
+    None => 0U
+  }
+  let text = match decoded {
+    Some(d) =>
+      if d.mode is Relative {
+        // A branch's operand is a signed displacement from the byte after the
+        // instruction, so the address shown is where it actually goes.
+        let displacement = if operand >= 0x80U {
+          operand.reinterpret_as_int() - 256
+        } else {
+          operand.reinterpret_as_int()
+        }
+        // The target is relative to the byte after the instruction, and the
+        // result is masked to sixteen bits because a branch can wrap.
+        let target = (address.reinterpret_as_int() + 2 + displacement) & 0xFFFF
+        @lib.render(d, target.reinterpret_as_uint())
+      } else {
+        @lib.render(d, operand)
+      }
+    None => "(undocumented)"
+  }
+  let bytes = match decoded {
+    Some(d) =>
+      match d.mode.operand_bytes() {
+        0 => hex2(opcode)
+        1 => hex2(opcode) + " " + hex2(@lib.peek(bus, address + 1U))
+        _ =>
+          hex2(opcode) +
+          " " +
+          hex2(@lib.peek(bus, address + 1U)) +
+          " " +
+          hex2(@lib.peek(bus, address + 2U))
+      }
+    None => hex2(opcode)
+  }
+  let pc = hex4(address)
   let a = hex_pad(cpu.a, 2).to_upper()
   let x = hex_pad(cpu.x, 2).to_upper()
   let y = hex_pad(cpu.y, 2).to_upper()
   let p = hex_pad(cpu.p, 2).to_upper()
   let sp = hex_pad(cpu.sp, 2).to_upper()
   let cyc = cpu.cycles
-  "\{pc}  \{op}        (?)                         A:\{a} X:\{x} Y:\{y} P:\{p} SP:\{sp} PPU:  0,  0 CYC:\{cyc}"
+  "\{pc}  \{trailing(bytes, 9)} \{trailing(text, 32)} A:\{a} X:\{x} Y:\{y} P:\{p} SP:\{sp} CYC:\{cyc}"
 }
 
 ///|
@@ -288,6 +378,23 @@ fn hex4(value : UInt32) -> String {
 /// Renders a byte the way the golden log does: two uppercase hex digits.
 fn hex2(value : UInt32) -> String {
   padded((value & 0xFF).to_string(radix=16).to_upper(), 2)
+}
+
+///|
+/// Pads `text` on the right with spaces, which is what a column that holds
+/// variable-length text needs. `padded` fills with zeroes on the left because it
+/// is for numbers, and using it here would render `LSR` as `000000LSR`.
+fn trailing(text : String, width : Int32) -> String {
+  let pad = width - text.length()
+  if pad <= 0 {
+    return text
+  }
+  let buf = StringBuilder(size_hint=width)
+  buf.write_string(text)
+  for _ in 0..<pad {
+    buf.write_char(' ')
+  }
+  buf.to_string()
 }
 
 ///|
