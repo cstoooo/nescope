@@ -61,7 +61,20 @@ pub fn Console::new(cart : Cart) -> Console {
     dma_cycles: 0L,
     apu: Apu::new(),
     irq_pending: false,
-  }
+  }.boot()
+}
+
+///|
+/// Boots a freshly built console the way the hardware does.
+///
+/// `Cpu::new` leaves the program counter at zero, which is fine for a unit test
+/// that sets it itself and wrong for every other caller: zero is the first byte
+/// of work RAM, so a console that is never reset starts executing a zero-filled
+/// page of RAM and runs whatever the zeros decode to. Booting here rather than
+/// asking callers to remember `reset()` makes the common path correct.
+fn Console::boot(self : Console) -> Console {
+  self.reset()
+  self
 }
 
 ///|
