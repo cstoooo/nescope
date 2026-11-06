@@ -37,13 +37,14 @@ pub(all) struct Console {
 pub fn Console::new(cart : Cart) -> Console {
   let cpu = Cpu::new()
   let ppu = Ppu::new()
-  ppu.mirroring = cart.mirroring
+  ppu.mirroring = cart.current_mirroring()
   // The CHR array is shared by reference: a CHR-RAM cartridge writes through the
   // PPU's data port and the cartridge must see the same bytes when it answers a
   // pattern fetch.
   let chr = cart.chr
   ppu.chr = chr
   ppu.chr_ram = cart.chr_ram
+  ppu.chr_bank = cart.chr_bank
   {
     cpu,
     ppu,
@@ -104,34 +105,27 @@ pub fn Console::write(self : Console, address : UInt32, value : UInt32) -> Unit 
   } else if offset == 0x4016 {
     self.strobe_controllers()
   } else if offset >= 0x4020 {
-    // Mapper writes are intercepted here; NROM has no banks to switch, so a
-    // write into cartridge space is ignored rather than treated as an error.
-    ()
+    // Program RAM, save RAM and the mapper's own registers share this range. The
+    // boards modelled here have no save RAM in this window, so a write either
+    // lands in a mapper register or disappears; either way the CPU cannot tell.
+    // A mapper write can also change the character bank or the mirroring, so the
+    // PPU's cached copies have to be refreshed afterwards.
+    if self.cart.write_mapper(at, value) {
+      self.ppu.chr_bank = self.cart.chr_bank
+      self.ppu.mirroring = self.cart.current_mirroring()
+    }
   }
 }
 
 ///|
-/// Reads a byte from the cartridge, which answers the whole upper half of the
-/// map for NROM.
+/// Reads a byte from the cartridge through the mapper's current banking.
 ///
-/// A 16 KiB NROM cartridge is wired to answer both $8000 and $C000 with the same
-/// chip, which is why a game smaller than 32 KiB can place its vectors at $FFFA
-/// and its code at $8000 without any banking.
+/// The address decode itself lives in `Cart::read_prg` because which slice of
+/// ROM answers is the board's decision, not the console's: a 16 KiB NROM board
+/// mirrors one chip into both windows, while a UxROM board puts the last bank in
+/// the high window and a switchable one in the low window.
 fn Console::cart_read(self : Console, address : UInt32) -> UInt32 {
-  if address >= 0xC000U {
-    let offset = (address - 0xC000U).reinterpret_as_int().to_int64()
-    if self.cart.prg.length() <= 0x4000 {
-      // The smaller board mirrors one 16 KiB chip into both halves.
-      self.cart.prg_byte(offset % 0x4000L)
-    } else {
-      // A 32 KiB chip fills both halves; subtracting the bank base would be a
-      // no-op here and is left out.
-      self.cart.prg_byte(offset + 0x4000L)
-    }
-  } else {
-    let offset = (address - 0x8000U).reinterpret_as_int().to_int64()
-    self.cart.prg_byte(offset % 0x4000L)
-  }
+  self.cart.read_prg(address)
 }
 
 ///|

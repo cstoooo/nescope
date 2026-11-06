@@ -15,6 +15,8 @@ fn main {
   }
   match args[1] {
     "--trace" => trace(args)
+    "--inspect" => inspect(args)
+    "--run" => run_rom(args)
     _ => {
       println("nescope: unknown command \{args[1]}")
       print_usage()
@@ -26,13 +28,114 @@ fn main {
 /// Prints the accepted command shapes.
 fn print_usage() -> Unit {
   let text =
-    #|usage: nescope --trace <binary> [--limit N] [--pc ADDR]
+    #|usage: nescope --inspect <rom.nes>
+    #|       nescope --run <rom.nes> [--frames N] [--write-png FILE]
+    #|       nescope --trace <binary> [--limit N] [--pc ADDR]
     #|
+    #|  --inspect <rom>  parse an iNES image and report its header: mapper,
+    #|                   mirroring, ROM sizes and where execution will start
+    #|  --run <rom>      boot the ROM and run whole frames
+    #|  --frames N       stop after N frames (default 1)
     #|  --trace <file>   load a flat binary at $C000 and print one line per
     #|                   instruction, in the layout `nestest.log` uses
     #|  --limit N        stop after N instructions (default 20)
     #|  --pc ADDR        start at this hex address instead of $C000
   println(text)
+}
+
+///|
+/// Reports what the header of an iNES image says.
+fn inspect(args : Array[String]) -> Unit {
+  let path = match option(args, "--inspect") {
+    Some(p) => p
+    None => {
+      println("nescope: --inspect needs a file")
+      return
+    }
+  }
+  let bytes = @fs.read_file_to_bytes(path) catch {
+    e => {
+      println("nescope: cannot read \{path}: \{Repr(e)}")
+      return
+    }
+  }
+  let cart = @lib.Cart::parse(bytes) catch {
+    e => {
+      println("nescope: \{path}: \{e.to_string()}")
+      return
+    }
+  }
+  let prg_bytes = cart.prg.length().to_int64()
+  let chr_bytes = cart.chr.length().to_int64()
+  println("file       \{path}")
+  println("mapper     \{cart.mapper.name()}")
+  println("mirroring  \{cart.mirroring.name()}")
+  println(
+    "program    \{cart.prg_banks} x 16 KiB (\{hex4(prg_bytes.to_int().reinterpret_as_uint())} bytes)",
+  )
+  if cart.chr_ram {
+    println(
+      "character  \{hex4(chr_bytes.to_int().reinterpret_as_uint())} bytes of RAM",
+    )
+  } else {
+    println(
+      "character  \{cart.chr_banks} x 8 KiB (\{hex4(chr_bytes.to_int().reinterpret_as_uint())} bytes)",
+    )
+  }
+  println("battery    \{cart.has_battery}")
+  let console = @lib.Console::new(cart)
+  let reset = console.read(0xFFFCU) | (console.read(0xFFFDU) << 8)
+  println("reset      \{hex4(reset)}")
+}
+
+///|
+/// Boots a ROM and runs whole frames, reporting how far it got.
+fn run_rom(args : Array[String]) -> Unit {
+  let path = match option(args, "--run") {
+    Some(p) => p
+    None => {
+      println("nescope: --run needs a file")
+      return
+    }
+  }
+  let frames = match option(args, "--frames") {
+    Some(text) => parse_decimal(text)
+    None => 1L
+  }
+  let bytes = @fs.read_file_to_bytes(path) catch {
+    e => {
+      println("nescope: cannot read \{path}: \{Repr(e)}")
+      return
+    }
+  }
+  let cart = @lib.Cart::parse(bytes) catch {
+    e => {
+      println("nescope: \{path}: \{e.to_string()}")
+      return
+    }
+  }
+  let console = @lib.Console::new(cart)
+  let mut ran = 0L
+  let mut stopped = ""
+  while ran < frames {
+    let outcome = Ok(console.run_frame(29780)) catch { e => Err(e) }
+    match outcome {
+      Ok(_) => ()
+      Err(e) => {
+        stopped = e.to_string()
+        break
+      }
+    }
+    ran = ran + 1L
+  }
+  println("frames     \{ran}")
+  println("cycles     \{console.cpu.cycles}")
+  println(
+    "pc         \{hex4(console.cpu.pc)}  a=\{hex2(console.cpu.a)} x=\{hex2(console.cpu.x)} y=\{hex2(console.cpu.y)} sp=\{hex2(console.cpu.sp)}",
+  )
+  if stopped != "" {
+    println("stopped    \{stopped}")
+  }
 }
 
 ///|

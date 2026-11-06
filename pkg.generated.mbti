@@ -47,9 +47,16 @@ pub(all) struct Cart {
   prg : Bytes
   chr : FixedArray[Byte]
   chr_ram : Bool
-  mapper : MapperKind
+  mut mapper : MapperKind
   prg_banks : Int64
   chr_banks : Int64
+  mut prg_bank : Int64
+  mut prg_bank_high : Int64
+  mut chr_bank : Int64
+  mut shift : UInt32
+  mut shift_count : UInt32
+  mut control : UInt32
+  mut mirroring_from_mapper : Bool
 }
 pub fn Cart::chr_byte(Self, Int64) -> UInt32
 pub fn Cart::parse(Bytes) -> Self raise NesError
@@ -157,6 +164,9 @@ pub impl Bus for FlatRam
 
 pub(all) enum MapperKind {
   Nrom
+  UxRom
+  Cnrom
+  Mmc1
   Unsupported(UInt32)
 }
 pub fn MapperKind::name(Self) -> String
@@ -206,6 +216,7 @@ pub(all) struct Ppu {
   mut mirroring : Mirroring
   mut chr : FixedArray[Byte]
   mut chr_ram : Bool
+  mut chr_bank : Int64
   mut oam_addr : UInt32
 }
 pub fn Ppu::new() -> Self

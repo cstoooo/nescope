@@ -63,17 +63,49 @@ pub(all) struct Cart {
   /// True when the header asked for writable character RAM.
   chr_ram : Bool
   /// Mapper number from the header.
-  mapper : MapperKind
+  mut mapper : MapperKind
   /// 1 or 2, meaning 16 KiB or 32 KiB program banks.
   prg_banks : Int64
   /// Number of 8 KiB character banks; zero for a CHR-RAM cartridge.
   chr_banks : Int64
+  /// Which 16 KiB program bank answers $8000. The upper window at $C000 is
+  /// always the last bank, which is what lets a bank-switched game keep its
+  /// vectors at a fixed address.
+  mut prg_bank : Int64
+  /// Which 16 KiB program bank answers $C000; only 32 KiB boards switch it.
+  mut prg_bank_high : Int64
+  /// Which 8 KiB character bank answers the PPU; only CHR-ROM boards switch it.
+  mut chr_bank : Int64
+  /// MMC1's five-write shift register: the value being assembled, and how many
+  /// bits have arrived.
+  mut shift : UInt32
+  mut shift_count : UInt32
+  /// MMC1's control register, which holds the mirroring bits among others.
+  mut control : UInt32
+  /// Set once the CPU has written to MMC1's control register, after which the
+  /// header's mirroring value no longer applies.
+  mut mirroring_from_mapper : Bool
 }
 
 ///|
 /// The mappers this build implements.
+///
+/// The set is chosen by how much of the licensed library each one unlocks per
+/// line of code rather than by number: NROM is the boards with no banking at
+/// all, UxROM and CNROM are single-register boards, and MMC1 is a shift register
+/// that most of the early library uses.
 pub(all) enum MapperKind {
+  /// No banking. $8000 and $C000 see the same chip on a 16 KiB board.
   Nrom
+  /// UxROM (mapper 2): one register selects the 16 KiB bank at $8000 and the
+  /// last bank is fixed at $C000.
+  UxRom
+  /// CNROM (mapper 3): one register selects the 8 KiB character bank, and the
+  /// program ROM is fixed.
+  Cnrom
+  /// MMC1 (mapper 1): a serial shift register loads five registers, so a program
+  /// has to write one bit at a time across five stores.
+  Mmc1
   /// A mapper number this build has no wiring for; loading succeeds so the
   /// header can still be inspected, but running raises when the CPU first
   /// touches cartridge space.
@@ -167,13 +199,22 @@ pub fn Cart::parse(bytes : Bytes) -> Cart raise NesError {
     prg,
     chr,
     chr_ram,
-    mapper: if mapper_number == 0 {
-      Nrom
-    } else {
-      Unsupported(mapper_number.reinterpret_as_uint())
-    },
+    mapper: mapper_of(mapper_number),
     prg_banks: prg_banks.to_int64(),
     chr_banks: chr_banks.to_int64(),
+    // UxROM powers up with the second-to-last bank selected, which is $FF on a
+    // board with fewer than 256 banks; the mask in the register write makes that
+    // the highest bank anyway. Resetting to the last bank instead would hide a
+    // program's very first bank switch behind a correct-looking screen.
+    prg_bank: 0L,
+    prg_bank_high: prg_banks.to_int64() - 2L,
+    chr_bank: 0L,
+    shift: 0U,
+    shift_count: 0U,
+    // $0C is the control register's power-on value: mode 3, so $C000 is fixed
+    // to the last bank and reset code can bank-switch without losing itself.
+    control: 0x0CU,
+    mirroring_from_mapper: false,
   }
 }
 
@@ -275,6 +316,9 @@ pub fn Cart::write_chr(self : Cart, offset : Int64, value : UInt32) -> Bool {
 pub fn MapperKind::name(self : MapperKind) -> String {
   match self {
     Nrom => "NROM"
+    UxRom => "UxROM"
+    Cnrom => "CNROM"
+    Mmc1 => "MMC1"
     Unsupported(number) => "mapper \{number} (unsupported)"
   }
 }
@@ -297,4 +341,4 @@ pub fn Mirroring::name(self : Mirroring) -> String {
 
 ///|
 
-///|
+///

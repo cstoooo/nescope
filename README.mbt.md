@@ -33,26 +33,39 @@ count is written once per opcode, next to the data-sheet entry it came from.
 moon test
 ```
 
-```
-Total tests: 14, passed: 14, failed: 0.
-```
-
-Trace a flat binary loaded at `$C000`:
+Read a real cartridge's header:
 
 ```sh
-moon run cmd/main -- --trace internal/fixtures/nestest.nes --limit 5
+moon run cmd/main -- --inspect internal/fixtures/nestest.nes
 ```
 
 ```
-C000  4E        (?)                         A:00 X:00 Y:00 P:24 SP:FD PPU:  0,  0 CYC:0
-C003  1A        (?)                         A:00 X:00 Y:00 P:26 SP:FD PPU:  0,  0 CYC:6
-C004  01        (?)                         A:00 X:00 Y:00 P:26 SP:FD PPU:  0,  0 CYC:8
+file       internal/fixtures/nestest.nes
+mapper     NROM
+mirroring  horizontal
+program    1 x 16 KiB (4000 bytes)
+character  1 x 8 KiB (2000 bytes)
+battery    false
+reset      C004
 ```
 
-The `(?)` column is the mnemonic, which this build does not disassemble yet. It
-is left visibly empty rather than filled with a guess so that a column that
-disagrees with a reference trace is known to be a state difference and not a
-formatting one.
+Boot it and run a frame:
+
+```sh
+moon run cmd/main -- --run internal/fixtures/nestest.nes --frames 2
+```
+
+```
+frames     2
+cycles     59567
+pc         C5F4  a=00 x=00 y=00 sp=FA
+```
+
+`--trace` still exists for flat binaries: it loads an image at `$C000` and prints
+one line per instruction in the layout `nestest.log` uses. Its `(?)` column is
+the mnemonic, which this build does not disassemble yet. It is left visibly
+empty rather than filled with a guess so that a column that disagrees with a
+reference trace is known to be a state difference and not a formatting one.
 
 ## What works today
 
@@ -68,21 +81,31 @@ formatting one.
 | Golden-log trace comparison against `nestest.log` | all 8991 lines |
 | iNES header parsing, including the twelve-bit bank counts | done |
 | NROM cartridge, 16 KiB mirroring into both halves of the map | done |
+| UxROM (mapper 2): switchable low window, last bank fixed at `$C000` | done |
+| CNROM (mapper 3): switchable character bank | done |
+| MMC1 (mapper 1): serial shift register, four bank arrangements, run-time mirroring | done |
 | PPU registers, read buffer, scroll latch, palette mirrors | done |
 | PPU: per-pixel background and sprite rendering | done |
 | Sprite DMA through `$4014` with the odd-cycle stall | done |
 | Controller shift registers in hardware order | done |
-| Mappers: MMC1, MMC3, UxROM, CNROM | planned |
+| Four-screen mirroring with its own 4 KiB of nametable RAM | done |
+| Sprite-zero hit: opaque sprite pixel over opaque background pixel | done |
+| Mappers: MMC3, MMC5, VRC | planned |
 | APU: pulse, triangle, noise, DMC, frame sequencer | planned |
-| Sprite-zero hit detection during rendering | approximate |
+| Sprite overflow flag | approximate |
+| PNG output of a finished frame | planned |
 
 ## How it is tested
 
-Two kinds of test in `cpu_wbtest.mbt`:
+Three kinds of test:
 
 - **Synthetic.** Each test builds a few bytes of program in flat RAM and pins one
   instruction: the cycle count, the flags set, the address written, or the
   program counter afterwards. A failure names the instruction.
+- **Banking.** `mapper_wbtest.mbt` builds synthetic cartridges whose program
+  banks are filled with their own bank number, so a read says which bank
+  answered. That is the only way to tell "bank three loaded" from "bank zero
+  loaded and happened to contain the right bytes".
 - **Differential.** The real `nestest` ROM is executed and every line compared
   with `nestest.log` — program counter, accumulator, X, Y, status, stack pointer
   and cumulative cycle count. The log is decimal in its `CYC:` column and hex
@@ -103,6 +126,7 @@ addressing.mbt   the addressing modes and their page penalties
 ops.mbt          operations: loads, ALU, shifts, compare, branch, jump
 isa.mbt          the opcode table
 cart.mbt         iNES parsing and the cartridge's memories
+mapper.mbt       bank switching: NROM, UxROM, CNROM, MMC1
 ppu.mbt          registers, rendering, sprites, palette and mirroring
 bus.mbt          the console: address decoding, DMA, controllers
 cmd/main/        the CLI

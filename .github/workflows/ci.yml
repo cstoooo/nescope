@@ -42,6 +42,9 @@ jobs:
       - name: Build the CLI
         run: moon build cmd/main
 
+      # Runs the CLI against a real cartridge rather than a synthetic image, so
+      # the smoke test covers header parsing, banking and a whole frame.
       - name: Smoke-test the CLI on a real ROM
         run: |
-          moon run cmd/main -- --trace internal/fixtures/nestest.nes --limit 5
+          moon run cmd/main -- --inspect internal/fixtures/nestest.nes
+          moon run cmd/main -- --run internal/fixtures/nestest.nes --frames 2

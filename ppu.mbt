@@ -85,6 +85,12 @@ pub(all) struct Status {
   /// register.
   mut sprite_zero_hit : Bool
   /// Set when more than eight sprites share a scanline.
+  ///
+  /// The hardware's evaluator also has a bug that corrupts the index when an
+  /// eighth sprite is found, which games use as a detection signature. This
+  /// build raises the flag at the honest moment and does not reproduce the
+  /// bug, so the flag is right but a game relying on the corruption will not
+  /// see it.
   mut overflow : Bool
 }
 
@@ -149,6 +155,13 @@ pub(all) struct Ppu {
   mut chr : FixedArray[Byte]
   /// True when the cartridge's character memory is RAM and accepts writes.
   mut chr_ram : Bool
+  /// Which 8 KiB character bank the mapper currently has selected.
+  ///
+  /// Kept here rather than read from the cartridge on every fetch because a
+  /// background row alone is eight pattern reads, and a pattern fetch happens
+  /// hundreds of times per scanline; the console refreshes this whenever a
+  /// mapper write changes it.
+  mut chr_bank : Int64
   /// The offset `$2003` last wrote, used by direct OAM access.
   mut oam_addr : UInt32
 }
@@ -198,6 +211,7 @@ pub fn Ppu::new() -> Ppu {
     mirroring: Horizontal,
     chr: FixedArray::make(0x2000, b'\x00'),
     chr_ram: false,
+    chr_bank: 0L,
     oam_addr: 0,
   }
 }
@@ -524,7 +538,18 @@ fn table_ram_base(mirroring : Mirroring, table : Int32) -> Int32 {
 ///|
 /// Reads a byte of character memory.
 fn Ppu::chr_byte(self : Ppu, offset : Int32) -> UInt32 {
-  self.chr[offset % self.chr.length()].to_int().reinterpret_as_uint() & 0xFF
+  let size = self.chr.length()
+  if size <= 0 {
+    return 0U
+  }
+  // Pattern tables are 8 KiB, and a board with more than one of them answers a
+  // fetch from whichever bank its register currently selects. Adding the bank
+  // base before the mask matters: masking first would pin every fetch to bank
+  // zero, which renders banks 1..n as a copy of the first.
+  let banks = size / 0x2000
+  let bank = if banks <= 0 { 0 } else { self.chr_bank.to_int() % banks }
+  let at = (bank * 0x2000 + offset % 0x2000) % size
+  self.chr[at].to_int().reinterpret_as_uint() & 0xFF
 }
 
 ///|
@@ -777,9 +802,11 @@ fn Ppu::write_vram(self : Ppu, value : UInt32) -> Unit {
     // Only a CHR-RAM cartridge accepts writes here. On a CHR-ROM board the
     // pattern tables are read-only, and silently writing would corrupt the tile
     // bitmaps that every sprite and background fetch reads back.
-    let at = address.reinterpret_as_int()
     let size = self.chr.length()
-    self.chr[at % size] = (value & 0xFF).to_byte()
+    let banks = size / 0x2000
+    let bank = if banks <= 0 { 0 } else { self.chr_bank.to_int() % banks }
+    let at = (bank * 0x2000 + address.reinterpret_as_int() % 0x2000) % size
+    self.chr[at] = (value & 0xFF).to_byte()
   }
   self.v = (self.v + self.increment()) & 0x7FFFU
 }
@@ -804,8 +831,7 @@ fn Ppu::vram_read(self : Ppu, address : UInt32) -> UInt32 {
     )
     self.nt_ram[at].to_int().reinterpret_as_uint() & 0xFF
   } else {
-    let at = address.reinterpret_as_int()
-    self.chr[at % self.chr.length()].to_int().reinterpret_as_uint() & 0xFF
+    self.chr_byte(address.reinterpret_as_int())
   }
 }
 

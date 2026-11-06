@@ -23,7 +23,7 @@ keywords = [ "nes", "6502", "emulator", "ppu", "retro" ]
 
 preferred_target = "wasm"
 
-description = "A Nintendo Entertainment System emulator in pure MoonBit: 6502 CPU, PPU, APU and mappers, verified against the nestest golden trace."
+description = "A Nintendo Entertainment System emulator in pure MoonBit: 6502 CPU, PPU and the NROM/UxROM/CNROM/MMC1 mappers, verified line by line against the nestest golden trace."
 
 import {
   "moonbitlang/x@0.5.7",
