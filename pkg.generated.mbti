@@ -2,6 +2,8 @@
 package "cstoooo/nescope"
 
 // Values
+pub const CPU_CLOCK : Int64 = 1789773
+
 pub const SCREEN_HEIGHT : Int32 = 240
 
 pub const SCREEN_WIDTH : Int32 = 256
@@ -9,6 +11,8 @@ pub const SCREEN_WIDTH : Int32 = 256
 pub fn decode(UInt32) -> Decoded?
 
 pub fn encode_png(FixedArray[Byte]) -> Bytes
+
+pub fn encode_wav(Array[UInt32], UInt32) -> Bytes
 
 pub fn hex2(UInt32) -> String
 
@@ -48,9 +52,12 @@ pub(all) struct Apu {
   control : FixedArray[UInt32]
   mut dmc_active : Bool
   mut enabled_channels : UInt32
+  mut mixer : Mixer
+  samples : Array[UInt32]
 }
 pub fn Apu::new() -> Self
 pub fn Apu::read_status(Self) -> UInt32
+pub fn Apu::take_samples(Self) -> Array[UInt32]
 pub fn Apu::tick(Self, Int64) -> Bool
 pub fn Apu::write_register(Self, UInt32, UInt32) -> Unit
 pub fn Apu::write_status(Self, UInt32) -> Unit
@@ -99,6 +106,15 @@ pub fn Cart::parse(Bytes) -> Self raise NesError
 pub fn Cart::prg_byte(Self, Int64) -> UInt32
 pub fn Cart::save_data(Self) -> Bytes
 pub fn Cart::write_chr(Self, Int64, UInt32) -> Bool
+
+pub(all) struct Channel {
+  mut period : UInt32
+  mut timer : UInt32
+  mut sequence : UInt32
+  mut duty : UInt32
+  mut active : Bool
+  mut output : UInt32
+}
 
 pub(all) struct Console {
   mut cpu : Cpu
@@ -258,6 +274,18 @@ pub(all) enum Mirroring {
   FourScreen
 }
 pub fn Mirroring::name(Self) -> String
+
+pub(all) struct Mixer {
+  pulse1 : Channel
+  pulse2 : Channel
+  triangle : Channel
+  noise : Channel
+  rate : UInt32
+  mut accumulator : Int64
+  mut step : Int64
+}
+pub fn Mixer::new(UInt32) -> Self
+pub fn Mixer::run(Self, Int64, Array[UInt32]) -> Int32
 
 pub(all) enum Mode {
   Implied

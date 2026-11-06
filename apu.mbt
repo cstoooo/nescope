@@ -68,6 +68,14 @@ pub(all) struct Apu {
   /// turned on. A length-counter write to a channel that is off is ignored,
   /// which is what keeps a silenced channel from starting up again.
   mut enabled_channels : UInt32
+  /// The oscillators, kept in step with the register writes so that a caller can
+  /// ask for samples at any point without replaying the writes.
+  mut mixer : Mixer
+  /// Mixed samples produced since the last drain. A game running with nobody
+  /// listening grows this without bound, so `take_samples` is what a caller that
+  /// wants audio calls; a caller that does not can leave it and it is cleared on
+  /// reset.
+  samples : Array[UInt32]
 }
 
 ///|
@@ -112,7 +120,17 @@ pub fn Apu::new() -> Apu {
     control: FixedArray::make(5, 0U),
     dmc_active: false,
     enabled_channels: 0U,
+    mixer: Mixer::new(44100U),
+    samples: [],
   }
+}
+
+///|
+/// Takes every sample produced since the last call and empties the buffer.
+pub fn Apu::take_samples(self : Apu) -> Array[UInt32] {
+  let taken = self.samples.copy()
+  self.samples.clear()
+  taken
 }
 
 ///|
@@ -122,6 +140,11 @@ pub fn Apu::new() -> Apu {
 /// console can take the interrupt at the right moment rather than polling.
 pub fn Apu::tick(self : Apu, cycles : Int64) -> Bool {
   self.cycles = self.cycles + cycles
+  // The oscillators advance by the same CPU cycles the frame counter does, and
+  // the samples they produce accumulate in a buffer the caller drains. Doing it
+  // from `tick` rather than from a separate audio path means the sample stream
+  // stays in step with the emulation even when nobody is listening.
+  ignore(self.mixer.run(cycles, self.samples))
   let mut raised = false
   // The sequence is periodic, so this has to wrap rather than stop at its end:
   // a counter that stopped would raise the frame IRQ once and never again, and
@@ -181,6 +204,20 @@ fn Apu::clock_length(self : Apu) -> Unit {
     }
     if self.length[channel] > 0U {
       self.length[channel] = self.length[channel] - 1U
+      // A counter that has just reached zero is what silences the oscillator. The
+      // check is inside the decrement rather than after the loop so that a channel
+      // which was already at zero is not restarted.
+      if self.length[channel] == 0U {
+        let voice = match channel {
+          0 => self.mixer.pulse1
+          1 => self.mixer.pulse2
+          2 => self.mixer.triangle
+          3 => self.mixer.noise
+          _ => self.mixer.noise
+        }
+        voice.active = false
+        voice.output = 0U
+      }
     }
   }
 }
@@ -218,6 +255,16 @@ pub fn Apu::write_status(self : Apu, value : UInt32) -> Unit {
     let on = (value & (1U << channel)) != 0
     if !on {
       self.length[channel] = 0U
+      // Disabling a channel silences its oscillator as well as clearing its
+      // counter, which is what makes `$4015` a mute rather than just a hint.
+      let voice = match channel {
+        0 => self.mixer.pulse1
+        1 => self.mixer.pulse2
+        2 => self.mixer.triangle
+        _ => self.mixer.noise
+      }
+      voice.active = false
+      voice.output = 0U
     }
   }
   self.dmc_active = (value & 0x10U) != 0
@@ -232,10 +279,11 @@ pub fn Apu::write_status(self : Apu, value : UInt32) -> Unit {
 ///|
 /// Writes a channel register.
 ///
-/// Only the bits that change the length counter and the frame counter are acted
-/// on. The rest — the timer periods, the envelopes — would matter to a mixer and
-/// are recorded so a later version can pick them up without changing the
-/// register decode.
+/// The period and duty writes are forwarded to the mixer's oscillators, so the
+/// audio a caller drains reflects the register writes without a second decode of
+/// the same bytes. What is recorded rather than acted on is the envelope and the
+/// sweep: they shape a note's volume and pitch over time, so leaving them out
+/// changes how a note evolves rather than whether it sounds.
 pub fn Apu::write_register(
   self : Apu,
   address : UInt32,
@@ -244,29 +292,74 @@ pub fn Apu::write_register(
   let value = value & 0xFFU
   match address & 0x1FU {
     0x00U | 0x04U => {
-      // Pulse 1 and 2 duty and halt.
+      // Pulse 1 and 2 duty and halt. The top two bits are the duty sequence, which
+      // is a timbre rather than a volume: getting them wrong makes every note the
+      // same shape.
       let channel = if (address & 0x1FU) == 0U { 0 } else { 1 }
       self.control[channel] = value
       self.halt[channel] = (value & 0x20U) != 0
+      let pulse = if channel == 0 {
+        self.mixer.pulse1
+      } else {
+        self.mixer.pulse2
+      }
+      pulse.duty = value >> 6
     }
     0x01U | 0x05U => {
       let channel = if (address & 0x1FU) == 0x01U { 0 } else { 1 }
       self.control[channel] = value
+      let pulse = if channel == 0 {
+        self.mixer.pulse1
+      } else {
+        self.mixer.pulse2
+      }
+      pulse.period = (pulse.period & 0x700U) | value
     }
-    0x02U | 0x06U => ()
+    0x02U | 0x06U => {
+      // In sweep mode this register holds the sweep parameters, but it is always
+      // the low eight bits of the period, and every game writes it in both modes.
+      // The sweep itself is not modelled: it bends a note's pitch over time, so
+      // leaving it out changes how a note evolves but not where it starts.
+      let channel = if (address & 0x1FU) == 0x02U { 0 } else { 1 }
+      self.control[channel] = value
+      let pulse = if channel == 0 {
+        self.mixer.pulse1
+      } else {
+        self.mixer.pulse2
+      }
+      pulse.period = (pulse.period & 0x700U) | value
+    }
     0x03U | 0x07U => {
       // The length counter is loaded from the top five bits whenever a channel's
       // fourth register is written, but only if the channel is enabled. Loading
       // it while the channel is off is what keeps a silenced channel silenced.
       let channel = if (address & 0x1FU) == 0x03U { 0 } else { 1 }
       self.load_length(channel, value >> 3)
+      // The register's low three bits are the period's high bits, so writing it
+      // changes the pitch as well as the length.
+      let pulse = if channel == 0 {
+        self.mixer.pulse1
+      } else {
+        self.mixer.pulse2
+      }
+      pulse.period = (pulse.period & 0xFFU) | ((value & 0x07U) << 8)
     }
     0x08U => {
       self.control[2] = value
       self.halt[2] = (value & 0x80U) != 0
+      // Bit 7 is the triangle's linear-counter control, exposed as the channel's
+      // `duty` field so the sequencer can be held.
+      self.mixer.triangle.duty = value >> 7
     }
-    0x0AU => ()
-    0x0BU => self.load_length(2, value >> 3)
+    0x0AU => {
+      self.control[2] = value
+      self.mixer.triangle.period = (self.mixer.triangle.period & 0x700U) | value
+    }
+    0x0BU => {
+      self.load_length(2, value >> 3)
+      self.mixer.triangle.period = (self.mixer.triangle.period & 0xFFU) |
+        ((value & 0x07U) << 8)
+    }
     0x0CU => {
       self.control[3] = value
       self.halt[3] = (value & 0x20U) != 0
@@ -332,4 +425,13 @@ fn Apu::load_length(self : Apu, channel : Int32, value : UInt32) -> Unit {
     return
   }
   self.length[channel] = length_table()[(value & 0x1FU).reinterpret_as_int()]
+  // A loaded length counter is what starts the channel; the oscillator follows
+  // the counter, so silencing the channel through `$4015` stops the sound too.
+  let voice = match channel {
+    0 => self.mixer.pulse1
+    1 => self.mixer.pulse2
+    2 => self.mixer.triangle
+    _ => self.mixer.noise
+  }
+  voice.active = true
 }

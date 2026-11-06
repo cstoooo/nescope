@@ -66,6 +66,16 @@ wrote      frame.png (184638 bytes)
 The point of the flag is that any ROM's frame becomes a file you can look at,
 which is the only way to check rendering without a window system.
 
+The audio the run produced can be written out too:
+
+```sh
+moon run cmd/main -- --run game.nes --frames 60 --write-wav audio.wav
+```
+
+The file is mono 16-bit PCM at 44100 Hz. One second of emulated time is one
+second of audio, because the mixer advances from the same CPU cycles the rest of
+the console does rather than from a wall clock.
+
 A cartridge whose header sets the battery bit gets a save file beside it:
 `--run zelda.nes` reads `zelda.srm` before booting and writes it back after the
 last frame, with the same name and format every other emulator uses. A board
@@ -109,7 +119,9 @@ reference trace is known to be a state difference and not a formatting one.
 | Mappers: MMC5, VRC, MMC2 and the other discrete boards | planned |
 | APU frame counter: 4-step and 5-step sequences, frame IRQ | done |
 | APU channel status and length counters, as `$4015` reports them | done |
-| APU: waveform synthesis and mixing | planned |
+| APU: pulse and triangle oscillators, duty sequences, length-driven silencing | done |
+| APU: nonlinear mixer with the hardware's two-stage curve | done |
+| APU: sweep units, envelopes, noise and DMC channels | planned |
 | Sprite overflow flag, evaluated per scanline like the hardware | done |
 | PNG output of a finished frame, written out without a dependency | done |
 | Disassembly of all 151 official opcodes, in reference-log format | done |

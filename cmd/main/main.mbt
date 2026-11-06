@@ -29,7 +29,7 @@ fn main {
 fn print_usage() -> Unit {
   let text =
     #|usage: nescope --inspect <rom.nes>
-    #|       nescope --run <rom.nes> [--frames N] [--write-png FILE]
+    #|       nescope --run <rom.nes> [--frames N] [--write-png FILE] [--write-wav FILE]
     #|       nescope --trace <binary> [--limit N] [--pc ADDR]
     #|
     #|  --inspect <rom>  parse an iNES image and report its header: mapper,
@@ -37,6 +37,7 @@ fn print_usage() -> Unit {
     #|  --run <rom>      boot the ROM and run whole frames
     #|  --frames N       stop after N frames (default 1)
     #|  --write-png FILE write the last completed frame as a PNG
+    #|  --write-wav FILE write the audio the run produced as a mono WAV
     #|  --trace <file>   load a flat binary at $C000 and print one line per
     #|                   instruction, in the layout `nestest.log` uses
     #|  --limit N        stop after N instructions (default 20)
@@ -156,6 +157,21 @@ fn run_rom(args : Array[String]) -> Unit {
     @fs.write_bytes_to_file(save_path, data) catch {
       e => println("nescope: cannot write \{save_path}: \{Repr(e)}")
     }
+  }
+  match option(args, "--write-wav") {
+    Some(target) => {
+      // The samples accumulated across every frame that ran, so the file is the
+      // audio of the whole run rather than of the last frame only.
+      let samples = console.apu.take_samples()
+      let wav = @lib.encode_wav(samples, 44100U)
+      @fs.write_bytes_to_file(target, wav) catch {
+        e => println("nescope: cannot write \{target}: \{Repr(e)}")
+      }
+      println(
+        "wrote      \{target} (\{wav.length()} bytes, \{samples.length()} samples)",
+      )
+    }
+    None => ()
   }
   match option(args, "--write-png") {
     Some(target) => {
