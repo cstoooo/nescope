@@ -44,7 +44,7 @@ pub(all) enum Mirroring {
   /// The cartridge supplies its own video RAM and the header's value is
   /// ignored.
   FourScreen
-} derive(Eq)
+}
 
 ///|
 /// A parsed cartridge.
@@ -78,7 +78,7 @@ pub(all) enum MapperKind {
   /// header can still be inspected, but running raises when the CPU first
   /// touches cartridge space.
   Unsupported(UInt32)
-} derive(Eq)
+}
 
 ///|
 /// Threshold beyond which a declared ROM size is rejected before allocating.
@@ -292,25 +292,9 @@ pub fn Mirroring::name(self : Mirroring) -> String {
 }
 
 ///|
-pub extend MapperKind with Eq::{equal, not_equal}
 
 ///|
-pub extend MapperKind with Show::{to_string, output}
 
 ///|
-/// Renders a mapper for a failure message or a report.
-impl Show for MapperKind with fn output(self, logger) {
-  logger.write_string(self.name())
-}
 
 ///|
-pub extend Mirroring with Eq::{equal, not_equal}
-
-///|
-pub extend Mirroring with Show::{to_string, output}
-
-///|
-/// Renders a mirroring mode for a failure message or a report.
-impl Show for Mirroring with fn output(self, logger) {
-  logger.write_string(self.name())
-}

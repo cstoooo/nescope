@@ -158,12 +158,8 @@ pub impl Bus for FlatRam
 pub(all) enum MapperKind {
   Nrom
   Unsupported(UInt32)
-} derive(Eq)
-pub fn MapperKind::equal(Self, Self) -> Bool
+}
 pub fn MapperKind::name(Self) -> String
-pub fn MapperKind::not_equal(Self, Self) -> Bool
-pub fn MapperKind::output(Self, &Logger) -> Unit
-pub fn MapperKind::to_string(Self) -> String
 
 pub(all) struct Mask {
   mut show_background_left : Bool
@@ -188,12 +184,8 @@ pub(all) enum Mirroring {
   SingleLow
   SingleHigh
   FourScreen
-} derive(Eq)
-pub fn Mirroring::equal(Self, Self) -> Bool
+}
 pub fn Mirroring::name(Self) -> String
-pub fn Mirroring::not_equal(Self, Self) -> Bool
-pub fn Mirroring::output(Self, &Logger) -> Unit
-pub fn Mirroring::to_string(Self) -> String
 
 pub(all) struct Ppu {
   ctrl : Ctrl

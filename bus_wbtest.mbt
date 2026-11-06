@@ -17,8 +17,8 @@ test "cart parses the nestest header" {
   same(cart.chr.length(), 0x2000)
   same(cart.prg_banks, 1L)
   same(cart.chr_banks, 1L)
-  same(cart.mapper, Nrom)
-  same(cart.mirroring, Horizontal)
+  same(cart.mapper.name(), "NROM")
+  same(cart.mirroring.name(), "horizontal")
   same_bool(cart.has_battery, false)
   same_bool(cart.chr_ram, false)
 }
