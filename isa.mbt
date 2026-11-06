@@ -235,9 +235,12 @@ fn Cpu::execute(
       4L
     }
     0x91 => {
+      // Every store through an indexed mode pays the full six cycles: unlike a
+      // read, a store cannot skip the cycle that would have fixed up the address
+      // after a page crossing, so the penalty is unconditional.
       let addr = self.indirect_indexed(bus)
       self.store(bus, addr, self.a)
-      5L
+      6L
     }
     0x94 => {
       let addr = self.zeropage_x(bus)
@@ -257,12 +260,12 @@ fn Cpu::execute(
     0x99 => {
       let addr = self.absolute_y(bus)
       self.store(bus, addr, self.a)
-      4L
+      5L
     }
     0x9D => {
       let addr = self.absolute_x(bus)
       self.store(bus, addr, self.a)
-      4L
+      5L
     }
     0xA0 => {
       self.ldy(self.immediate(bus))
@@ -674,11 +677,14 @@ fn Cpu::execute(
       6L
     }
     0x40 => {
+      // RTI pulls the status first and the program counter second, and unlike
+      // RTS it does not increment: BRK already pushed the address of the byte
+      // after its own operand byte, which is the address to resume at.
       let status = self.pop(bus)
       self.p = (status | FLAG_UNUSED) & (FLAG_BREAK ^ 0xFFFF_FFFFU)
       let lo = self.pop(bus)
       let hi = self.pop(bus)
-      self.pc = (((hi << 8) | lo) + 1) & 0xFFFF
+      self.pc = (hi << 8) | lo
       6L
     }
     0x00 => self.brk(bus)
@@ -739,8 +745,11 @@ fn Cpu::execute(
       4L
     }
     0x1C | 0x3C | 0x5C | 0x7C | 0xDC | 0xFC => {
-      ignore(self.absolute_x(bus))
-      4L
+      // The multi-byte NOP reads its operand address and therefore pays the same
+      // page-crossing penalty a real indexed read would.
+      let (addr, page) = self.absolute_x_page(bus)
+      ignore(self.read_operand(bus, addr))
+      4L + page
     }
     0xA7 => self.lax(bus, self.zeropage(bus), 3L)
     0xB7 => self.lax(bus, self.zeropage_y(bus), 4L)

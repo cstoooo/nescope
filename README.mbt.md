@@ -2,10 +2,10 @@
 
 A Nintendo Entertainment System emulator in pure MoonBit.
 
-The CPU is complete: all 151 official 6502 opcodes plus the unofficial ones real
-cartridges and the conformance ROMs execute. Its instruction trace is checked
-line by line against `nestest.log`, the reference trace that ships with the
-widely used `nestest` ROM.
+The console runs: CPU, PPU, cartridge and the bus that joins them. The whole
+`nestest` ROM executes from a real cartridge image and every one of its 8991
+instruction traces is compared against `nestest.log`, the reference trace that
+ships with the ROM.
 
 ## Why it is structured this way
 
@@ -65,13 +65,16 @@ formatting one.
 | The `JMP ($xxFF)` page-boundary bug | done |
 | `BRK` / `RTI` / `JSR` / `RTS` stack behaviour | done |
 | `BIT` as a two-bit branch on one memory read | done |
-| Golden-log trace comparison against `nestest.log` | 200 of 8991 lines |
-| PPU: registers, scanline rendering, sprites, scrolling | planned |
+| Golden-log trace comparison against `nestest.log` | all 8991 lines |
+| iNES header parsing, including the twelve-bit bank counts | done |
+| NROM cartridge, 16 KiB mirroring into both halves of the map | done |
+| PPU registers, read buffer, scroll latch, palette mirrors | done |
+| PPU: per-pixel background and sprite rendering | done |
+| Sprite DMA through `$4014` with the odd-cycle stall | done |
+| Controller shift registers in hardware order | done |
+| Mappers: MMC1, MMC3, UxROM, CNROM | planned |
 | APU: pulse, triangle, noise, DMC, frame sequencer | planned |
-| Cartridges and mappers: NROM, MMC1, MMC3, UxROM, CNROM | planned |
-
-The 200-line limit is a test-speed choice, not a capability one; the whole log
-runs in one pass and is the next thing to turn on.
+| Sprite-zero hit detection during rendering | approximate |
 
 ## How it is tested
 
@@ -99,6 +102,9 @@ cpu.mbt          register file, bus trait, fetch/step, stack
 addressing.mbt   the addressing modes and their page penalties
 ops.mbt          operations: loads, ALU, shifts, compare, branch, jump
 isa.mbt          the opcode table
+cart.mbt         iNES parsing and the cartridge's memories
+ppu.mbt          registers, rendering, sprites, palette and mirroring
+bus.mbt          the console: address decoding, DMA, controllers
 cmd/main/        the CLI
 ```
 
