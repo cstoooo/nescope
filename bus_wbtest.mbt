@@ -13,14 +13,14 @@ fn fixture_cart(name : String) -> Cart raise {
 /// character bank and no mapper, and the parser must agree byte for byte.
 test "cart parses the nestest header" {
   let cart = fixture_cart("nestest.nes")
-  same(cart.prg.length(), 0x4000)
-  same(cart.chr.length(), 0x2000)
-  same(cart.prg_banks, 1L)
-  same(cart.chr_banks, 1L)
-  same(cart.mapper.name(), "NROM")
-  same(cart.mirroring.name(), "horizontal")
-  same_bool(cart.has_battery, false)
-  same_bool(cart.chr_ram, false)
+  inspect_eq(cart.prg.length(), 0x4000)
+  inspect_eq(cart.chr.length(), 0x2000)
+  inspect_eq(cart.prg_banks, 1L)
+  inspect_eq(cart.chr_banks, 1L)
+  inspect_eq(cart.mapper.name(), "NROM")
+  inspect_eq(cart.mirroring.name(), "horizontal")
+  inspect_bool(cart.has_battery, false)
+  inspect_bool(cart.chr_ram, false)
 }
 
 ///|
@@ -53,8 +53,8 @@ test "cart rejects a truncated program ROM" {
   let result = Ok(Cart::parse(bytes)) catch { e => Err(e) }
   match result {
     Err(Truncated(kind~, declared~, ..)) => {
-      same(kind, "program ROM")
-      same(declared, 0x4000L)
+      inspect_eq(kind, "program ROM")
+      inspect_eq(declared, 0x4000L)
     }
     _ => fail("expected Truncated")
   }
@@ -68,11 +68,11 @@ test "work RAM mirrors every 2 KiB" {
   let cart = fixture_cart("nestest.nes")
   let console = Console::new(cart)
   console.write(0x0000U, 0x5AU)
-  same(console.read(0x0800U), 0x5AU)
-  same(console.read(0x1000U), 0x5AU)
-  same(console.read(0x1800U), 0x5AU)
+  inspect_eq(console.read(0x0800U), 0x5AU)
+  inspect_eq(console.read(0x1000U), 0x5AU)
+  inspect_eq(console.read(0x1800U), 0x5AU)
   console.write(0x1FFFU, 0xA5U)
-  same(console.read(0x07FFU), 0xA5U)
+  inspect_eq(console.read(0x07FFU), 0xA5U)
 }
 
 ///|
@@ -84,9 +84,9 @@ test "PPU registers mirror every eight bytes" {
   // checked by setting vblank and reading through $200A rather than through a
   // write-only register.
   console.ppu.status.vblank = true
-  same(console.read(0x200AU) & 0x80U, 0x80U)
+  inspect_eq(console.read(0x200AU) & 0x80U, 0x80U)
   // Reading through the mirror must clear the same flag the real address owns.
-  same_bool(console.ppu.status.vblank, false)
+  inspect_bool(console.ppu.status.vblank, false)
 }
 
 ///|
@@ -98,7 +98,7 @@ test "a 16 KiB NROM mirrors into both halves of the upper map" {
   let console = Console::new(cart)
   let from_low = console.read(0x8000U)
   let from_high = console.read(0xC000U)
-  same(from_low, from_high)
+  inspect_eq(from_low, from_high)
 }
 
 ///|
@@ -110,8 +110,8 @@ test "reset takes the program counter from the vector" {
   // `nestest`'s reset vector is $C004; the golden log starts at $C000, which is
   // where the reference emulator was pointed rather than where the hardware
   // would have landed.
-  same(console.cpu.pc, 0xC004U)
-  same(console.cpu.sp, 0xFDU)
+  inspect_eq(console.cpu.pc, 0xC004U)
+  inspect_eq(console.cpu.sp, 0xFDU)
 }
 
 ///|
@@ -130,12 +130,12 @@ test "controllers shift out in hardware order" {
   for _ in 0..<10 {
     bits.push(console.read(0x4016U))
   }
-  same(bits[0], 1U)
-  same(bits[1], 0U)
-  same(bits[2], 0U)
-  same(bits[3], 1U)
-  same(bits[8], 1U)
-  same(bits[9], 1U)
+  inspect_eq(bits[0], 1U)
+  inspect_eq(bits[1], 0U)
+  inspect_eq(bits[2], 0U)
+  inspect_eq(bits[3], 1U)
+  inspect_eq(bits[8], 1U)
+  inspect_eq(bits[9], 1U)
 }
 
 ///|
@@ -200,18 +200,4 @@ fn inspect_tuple(
   buf.write_string(" cycles=")
   buf.write_string(cycles.to_string())
   buf.to_string()
-}
-
-///|
-/// Compares two values and fails with both sides shown.
-fn[T : Eq + Show] same(actual : T, expected : T) -> Unit raise {
-  if actual != expected {
-    fail("actual=\{actual} expected=\{expected}")
-  }
-}
-
-///|
-/// Reports a boolean against its expected value.
-fn same_bool(actual : Bool, expected : Bool) -> Unit raise {
-  same(actual, expected)
 }

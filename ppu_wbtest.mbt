@@ -270,3 +270,140 @@ fn[T : Eq + Show] inspect_eq(actual : T, expected : T) -> Unit raise {
 fn inspect_bool(actual : Bool, expected : Bool) -> Unit raise {
   inspect_eq(actual, expected)
 }
+
+///|
+/// Reports a byte against its expected value, naming the sample point so a
+/// failure says which corner of the screen drifted.
+fn inspect_at(label : String, actual : Int32, expected : Int32) -> Unit raise {
+  if actual != expected {
+    fail(
+      "\{label}: actual=\{actual.to_string(radix=16)} expected=\{expected.to_string(radix=16)}",
+    )
+  }
+}
+
+///|
+/// A CHR-ROM cartridge's pattern tables are read-only: a write through $2007 must
+/// leave them untouched rather than corrupting the tile data every fetch reads.
+test "CHR-ROM ignores writes through the data port" {
+  let ppu = ppu_with_chr()
+  ppu.chr_ram = false
+  ppu.chr[0] = b'\x5a'
+  ppu.write_register(0x06U, 0x00U)
+  ppu.write_register(0x06U, 0x00U)
+  ppu.write_register(0x07U, 0xFFU)
+  inspect_eq(ppu.chr[0].to_int().reinterpret_as_uint(), 0x5AU)
+}
+
+///|
+/// A CHR-RAM cartridge accepts the same write, which is what lets a game generate
+/// its own tiles at run time.
+test "CHR-RAM accepts writes through the data port" {
+  let ppu = ppu_with_chr()
+  ppu.chr_ram = true
+  ppu.write_register(0x06U, 0x00U)
+  ppu.write_register(0x06U, 0x00U)
+  ppu.write_register(0x07U, 0xFFU)
+  inspect_eq(ppu.chr[0].to_int().reinterpret_as_uint(), 0xFFU)
+}
+
+///|
+/// Sprite-zero hit requires an opaque sprite pixel over an opaque background
+/// pixel. With the background disabled there is nothing to hit against, so the
+/// flag must stay clear even when sprite zero covers the whole screen.
+test "sprite zero does not hit when the background is off" {
+  let ppu = ppu_with_chr()
+  // Sprite zero: top edge on scanline 1 (OAM stores the edge minus one), tile 1,
+  // palette 0, x = 0.
+  ppu.oam[0] = b'\x00'
+  ppu.oam[1] = b'\x01'
+  ppu.oam[2] = b'\x00'
+  ppu.oam[3] = b'\x00'
+  // A tile whose every pixel is opaque colour 1.
+  for row in 0..<8 {
+    ppu.chr[16 + row] = b'\xff'
+  }
+  ppu.mask.show_sprites = true
+  ppu.mask.show_sprites_left = true
+  ppu.mask.show_background = false
+  for _ in 0..<16 {
+    ignore(ppu.tick())
+  }
+  inspect_bool(ppu.status.sprite_zero_hit, false)
+}
+
+///|
+/// With an opaque tile under sprite zero the hit is raised, which is the signal a
+/// status-bar split waits for.
+test "sprite zero hits an opaque background pixel" {
+  let ppu = ppu_with_chr()
+  // Tile 2 is solid colour 1 in both planes, so the background is opaque.
+  for row in 0..<8 {
+    ppu.chr[32 + row] = b'\xff'
+  }
+  fill_nametable(ppu, 2U, 0x00U)
+  ppu.set_palette_byte(0x00U, 0x0FU)
+  ppu.set_palette_byte(0x01U, 0x30U)
+  // Sprite zero sits over the same pixels. OAM's y is the top edge minus one, so
+  // $FF puts the sprite's first row on scanline 0.
+  ppu.oam[0] = b'\xFF'
+  ppu.oam[1] = b'\x02'
+  ppu.oam[2] = b'\x00'
+  ppu.oam[3] = b'\x00'
+  for row in 0..<8 {
+    ppu.chr[32 + row] = b'\xff'
+  }
+  ppu.mask.show_sprites = true
+  ppu.mask.show_sprites_left = true
+  ppu.mask.show_background = true
+  ppu.mask.show_background_left = true
+  ppu.v = 0x2000U
+  for _ in 0..<16 {
+    ignore(ppu.tick())
+  }
+  inspect_bool(ppu.status.sprite_zero_hit, true)
+}
+
+///|
+test "background walks the nametable so each quadrant gets its own palette" {
+  // One tile fills the screen; only the attribute table differs, so a pixel's
+  // colour proves that v advanced across the nametable and did not stay pinned
+  // to a single tile.
+  let ppu = Ppu::new()
+  for i in 0..<(32 * 30) {
+    ppu.nt_ram[i] = b'\x01'
+  }
+  for ar in 0..<8 {
+    for ac in 0..<8 {
+      let palette = (if ac < 4 { 0 } else { 1 }) + (if ar < 4 { 0 } else { 2 })
+      ppu.nt_ram[0x3C0 + ar * 8 + ac] = match palette {
+        0 => b'\x00'
+        1 => b'\x55'
+        2 => b'\xAA'
+        _ => b'\xFF'
+      }
+    }
+  }
+  for row in 0..<8 {
+    ppu.chr[16 + row] = b'\xFF'
+  }
+  ppu.set_palette_byte(0x00U, 0x0FU)
+  ppu.set_palette_byte(0x01U, 0x2AU)
+  ppu.set_palette_byte(0x05U, 0x16U)
+  ppu.set_palette_byte(0x09U, 0x27U)
+  ppu.set_palette_byte(0x0DU, 0x12U)
+  ppu.mask.show_background = true
+  ppu.mask.show_background_left = true
+  ppu.v = 0x2000U
+  ppu.t = 0x2000U
+  for _ in 0..<(262 * 341) {
+    ignore(ppu.tick())
+  }
+  let at = fn(x : Int32, y : Int32) { ppu.frame[y * 256 + x] }
+  inspect_at("top-left", at(0, 0).to_int() & 0xFF, 0x2A)
+  inspect_at("top-right", at(255, 0).to_int() & 0xFF, 0x16)
+  inspect_at("bottom-left", at(0, 200).to_int() & 0xFF, 0x27)
+  inspect_at("bottom-right", at(255, 200).to_int() & 0xFF, 0x12)
+  inspect_at("mid-left", at(100, 100).to_int() & 0xFF, 0x2A)
+  inspect_at("mid-right", at(200, 100).to_int() & 0xFF, 0x16)
+}

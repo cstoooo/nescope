@@ -210,6 +210,7 @@ pub(all) struct Ppu {
 }
 pub fn Ppu::new() -> Self
 pub fn Ppu::read_register(Self, UInt32) -> UInt32
+pub fn Ppu::rendering_enabled(Self) -> Bool
 pub fn Ppu::set_palette_byte(Self, UInt32, UInt32) -> Unit
 pub fn Ppu::tick(Self) -> Bool
 pub fn Ppu::write_register(Self, UInt32, UInt32) -> Unit

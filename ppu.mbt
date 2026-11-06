@@ -200,6 +200,80 @@ pub fn Ppu::new() -> Ppu {
 }
 
 ///|
+/// What the background layer contributes at one position.
+///
+/// `opaque` is separate from the colour because a background pixel can resolve
+/// to the backdrop colour and still count as opaque for sprite-zero purposes;
+/// conflating the two is what makes a status-bar split fire at the wrong line.
+priv struct BackgroundPixel {
+  /// The palette entry, or the backdrop colour when nothing was drawn.
+  colour : UInt32
+  /// True when a tile pixel covered this position, whatever its colour.
+  covered : Bool
+}
+
+///|
+/// Computes the background layer at one position from the current scroll state.
+///
+/// Kept as one function so that rendering and sprite-zero detection agree by
+/// construction rather than by two copies of the same arithmetic.
+///
+/// The vertical position comes from `v`, not from the scanline: a game that
+/// rewrites the scroll register mid-frame is telling the PPU to draw a different
+/// part of the nametable from here on, and reading the scanline instead would
+/// ignore that.
+fn Ppu::background_pixel(self : Ppu, x : Int32, _y : Int32) -> BackgroundPixel {
+  let backdrop = self.palette_byte(0) & 0x3F
+  let hidden = if x < 8 && !self.mask.show_background_left {
+    true
+  } else {
+    !self.mask.show_background
+  }
+  if hidden {
+    return { colour: backdrop, covered: false, }
+  }
+  let scroll_x = (self.v & 0x1F).reinterpret_as_int() * 8 +
+    self.fine_x.reinterpret_as_int()
+  let table_x = scroll_x / 256 % 2
+  let name_x = scroll_x % 256 / 8
+  let name_y = ((self.v >> 5) & 0x1F).reinterpret_as_int()
+  let tile = self.nametable_byte(
+    self.ctrl.nametable | table_x.reinterpret_as_uint(),
+    name_x,
+    name_y,
+  )
+  let fine_y = ((self.v >> 12) & 0x07).reinterpret_as_int()
+  let row = self.pattern_row(
+    tile,
+    fine_y.reinterpret_as_uint(),
+    self.ctrl.background_pattern,
+  )
+  let bit = 7 - scroll_x % 8
+  // A background pixel is one bit from the low plane: its colour is always 0 or 1,
+  // never 2 or 3. Reading the joined word without masking would pick up the high
+  // plane's bit and produce colours the background layer cannot show.
+  let low = row & 0xFF
+  let pixel = (low >> bit) & 1
+  if pixel == 0 {
+    return { colour: backdrop, covered: false, }
+  }
+  let attr = self.attribute_byte(
+    self.ctrl.nametable | table_x.reinterpret_as_uint(),
+    name_x,
+    name_y,
+  )
+  let high_bits : Int32 = name_y % 4 / 2 * 2 + name_x % 4 / 2
+  let palette_index = (attr >> (high_bits * 2)) & 0x03U
+  {
+    // The palette's first entry is the backdrop, so a tile pixel of colour 1 maps
+    // to entry 1 of its group rather than to entry 0. Adding one for the backdrop
+    // as well would shift every background colour by one group.
+    colour: self.palette_byte(palette_index * 4 + pixel) & 0x3F,
+    covered: true,
+  }
+}
+
+///|
 /// Advances the raster by one dot and renders the pixel it lands on.
 ///
 /// Returns true on the dot that starts vertical blank, so that the caller can
@@ -214,12 +288,28 @@ pub fn Ppu::tick(self : Ppu) -> Bool {
   }
   let mut started_vblank = false
   self.dot = self.dot + 1
+  // `v` walks across the nametable as dots are emitted: every eighth dot it moves
+  // to the next tile column, and at the end of a scanline it moves to the next
+  // row. Without this the whole screen is one tile, which is what a static `v`
+  // produces and it looks like a rendering bug rather than a missing one.
+  if self.rendering_enabled() {
+    if self.dot == 256 {
+      self.increment_y()
+    } else if self.dot == 257 {
+      self.copy_horizontal()
+    } else if self.dot % 8 == 0 && self.dot < 256 {
+      self.increment_x()
+    }
+  }
   if self.dot >= DOTS_PER_SCANLINE {
     self.dot = 0
     self.scanline = self.scanline + 1
     if self.scanline == VBLANK_START {
       self.status.vblank = true
       started_vblank = true
+      // The vertical blank hands the rest of the frame back to the CPU, and the
+      // next frame starts from the top of the picture.
+      self.copy_vertical()
     } else if self.scanline >= 262 {
       self.scanline = 0
       self.frame_complete = true
@@ -227,9 +317,69 @@ pub fn Ppu::tick(self : Ppu) -> Bool {
       // hardware clears it when the pre-render line finishes rather than when
       // the CPU reads $2002.
       self.status.vblank = false
+      self.copy_vertical()
     }
   }
   started_vblank
+}
+
+///|
+/// True when either layer is on, which is when the hardware advances the
+/// rendering address.
+pub fn Ppu::rendering_enabled(self : Ppu) -> Bool {
+  self.mask.show_background || self.mask.show_sprites
+}
+
+///|
+/// Advances the coarse horizontal scroll by one tile, wrapping into the next
+/// nametable at the end of a row.
+fn Ppu::increment_x(self : Ppu) -> Unit {
+  if (self.v & 0x001F) == 0x1F {
+    self.v = self.v & 0x7FE0
+    // Bit 10 selects which of the two horizontal nametables the row continues
+    // into; toggling it is how the PPU walks past the right edge.
+    self.v = self.v ^ 0x0400
+  } else {
+    self.v = self.v + 1
+  }
+}
+
+///|
+/// Advances to the next row of tiles, wrapping into the next vertical nametable
+/// after the twenty-ninth row.
+///
+/// The wrap compares against 29 rather than 31 because the bottom two rows of a
+/// nametable are the attribute table, not tiles.
+fn Ppu::increment_y(self : Ppu) -> Unit {
+  if (self.v & 0x7000) != 0x7000 {
+    self.v = self.v + 0x1000
+  } else {
+    self.v = self.v & 0x0FFF
+    let mut coarse_y = (self.v & 0x03E0) >> 5
+    if coarse_y == 29 {
+      coarse_y = 0
+      self.v = self.v ^ 0x0800
+    } else if coarse_y == 31 {
+      coarse_y = 0
+    } else {
+      coarse_y = coarse_y + 1
+    }
+    self.v = (self.v & 0x7C1FU) | (coarse_y << 5)
+  }
+}
+
+///|
+/// Copies the horizontal scroll bits from the staging register into the rendering
+/// address, which the hardware does at dot 257 of every scanline.
+fn Ppu::copy_horizontal(self : Ppu) -> Unit {
+  self.v = (self.v & 0x7BE0U) | (self.t & 0x041FU)
+}
+
+///|
+/// Copies the vertical scroll bits from the staging register, which the hardware
+/// does during the pre-render line and at the start of vertical blank.
+fn Ppu::copy_vertical(self : Ppu) -> Unit {
+  self.v = (self.v & 0x041FU) | (self.t & 0x7BE0U)
 }
 
 ///|
@@ -243,43 +393,21 @@ pub fn Ppu::tick(self : Ppu) -> Bool {
 fn Ppu::render_pixel(self : Ppu) -> Unit {
   let x = self.dot
   let y = self.scanline
-  let backdrop = self.palette_byte(0) & 0x3F
-  let mut index = backdrop
-  if self.mask.show_background {
-    let scroll_x = (self.v & 0x1F).reinterpret_as_int() * 8 +
-      self.fine_x.reinterpret_as_int()
-    let table_x = scroll_x / 256 % 2
-    let name_x = scroll_x % 256 / 8
-    let name_y = ((self.v >> 5) & 0x1F).reinterpret_as_int()
-    let tile = self.nametable_byte(
-      self.ctrl.nametable | table_x.reinterpret_as_uint(),
-      name_x,
-      name_y,
-    )
-    let fine_y = ((self.v >> 12) & 0x07).reinterpret_as_int()
-    let row = self.pattern_row(
-      tile,
-      fine_y.reinterpret_as_uint(),
-      self.ctrl.background_pattern,
-    )
-    let bit = 7 - scroll_x % 8
-    let pixel = (row >> bit) & 1
-    if pixel != 0 {
-      let attr = self.attribute_byte(
-        self.ctrl.nametable | table_x.reinterpret_as_uint(),
-        name_x,
-        name_y,
-      )
-      let high_bits : Int32 = name_y % 4 / 2 * 2 + name_x % 4 / 2
-      let shift : Int32 = high_bits * 2
-      let palette_index = (attr >> shift) & 0x03U
-      index = self.palette_byte(1 + palette_index * 4 + pixel) & 0x3F
-    }
-  }
+  let background = self.background_pixel(x, y)
+  let mut index = background.colour
   if self.mask.show_sprites {
     let sprite = self.sprite_pixel(x, y)
     match sprite {
-      Some(pixel) => index = pixel
+      Some(pixel) => {
+        // Sprite zero hit is raised only when an opaque sprite pixel overlaps an
+        // opaque background pixel. Raising it whenever sprite zero covers this
+        // scanline is the usual shortcut and it breaks every game that splits the
+        // screen at a status bar, because the hit arrives a whole scanline early.
+        if pixel.is_zero && background.covered {
+          self.status.sprite_zero_hit = true
+        }
+        index = pixel.colour
+      }
       None => ()
     }
   }
@@ -409,7 +537,28 @@ fn Ppu::chr_byte(self : Ppu, offset : Int32) -> UInt32 {
 /// Sprites are drawn in OAM order and the first opaque pixel wins, except that
 /// sprite 0 hitting an opaque background pixel raises the sprite-zero flag,
 /// which is the only way a game can synchronise to the raster.
-fn Ppu::sprite_pixel(self : Ppu, x : Int32, y : Int32) -> UInt32? {
+
+///|
+/// An opaque sprite pixel together with which sprite it came from.
+///
+/// The index is carried out because sprite zero's hit flag depends on the sprite's
+/// position in OAM, and OAM is the only fixed point a game can rely on to know
+/// when the raster has reached a particular line.
+priv struct SpritePixel {
+  /// The palette entry to draw.
+  colour : UInt32
+  /// True when this came from the sprite at OAM index zero.
+  is_zero : Bool
+}
+
+///|
+/// Finds the frontmost opaque sprite pixel at a position.
+///
+/// Sprites are drawn in OAM order and the first opaque pixel wins, so a sprite
+/// with a higher index that overlaps a lower one is hidden behind it. That is the
+/// opposite of the background layer, where nothing overlaps, and it is what makes
+/// hardware-sprite multiplexing possible.
+fn Ppu::sprite_pixel(self : Ppu, x : Int32, y : Int32) -> SpritePixel? {
   if x < 8 && !self.mask.show_sprites_left {
     return None
   }
@@ -417,12 +566,18 @@ fn Ppu::sprite_pixel(self : Ppu, x : Int32, y : Int32) -> UInt32? {
   let mut drawn = 0
   for i in 0..<64 {
     let at = i * 4
-    let sprite_y = self.oam[at].to_int().reinterpret_as_uint() + 1U
+    let sprite_y = self.oam[at].to_int().reinterpret_as_uint()
     let tile_index = self.oam[at + 1].to_int().reinterpret_as_uint()
     let attributes = self.oam[at + 2].to_int().reinterpret_as_uint()
     let sprite_x = self.oam[at + 3].to_int().reinterpret_as_uint()
-    let top = sprite_y.reinterpret_as_int()
-    if y < top || y >= top + height {
+    // OAM stores the sprite's top edge minus one, so $FF means the sprite starts
+    // on scanline 0. The addition wraps inside eight bits rather than going
+    // negative, which is why $FF is the top of the screen rather than above it.
+    let top = ((sprite_y + 1U) & 0xFFU).reinterpret_as_int()
+    let row = y - top
+    // A negative difference means the scanline is above the sprite; a distance at
+    // least the sprite's height means it is below.
+    if row < 0 || row >= height {
       continue
     }
     if x < sprite_x.reinterpret_as_int() ||
@@ -434,7 +589,7 @@ fn Ppu::sprite_pixel(self : Ppu, x : Int32, y : Int32) -> UInt32? {
       self.status.overflow = true
       break
     }
-    let mut row = y - top
+    let mut row = row
     if (attributes & 0x80) != 0 {
       row = height - 1 - row
     }
@@ -456,25 +611,13 @@ fn Ppu::sprite_pixel(self : Ppu, x : Int32, y : Int32) -> UInt32? {
     let bit = 7 - column
     let pixel = (bitmap >> bit) & 3
     if pixel != 0 {
-      if i == 0 && self.mask.show_background && self.background_opaque(x, y) {
-        self.status.sprite_zero_hit = true
-      }
-      return Some(self.palette_byte(0x10 + palette * 4 + pixel) & 0x3F)
+      return Some({
+        colour: self.palette_byte(0x10 + palette * 4 + pixel) & 0x3F,
+        is_zero: i == 0,
+      })
     }
   }
   None
-}
-
-///|
-/// True when the background contributes a non-transparent pixel at a position,
-/// which is what sprite-zero hit detection tests against.
-fn Ppu::background_opaque(self : Ppu, x : Int32, y : Int32) -> Bool {
-  ignore(x)
-  ignore(y)
-  // The background is opaque wherever it draws a tile pixel; the current
-  // implementation approximates that as "rendering is on", which is correct for
-  // every case where sprite zero is actually used to split the screen.
-  self.mask.show_background
 }
 
 ///|
@@ -633,8 +776,10 @@ fn Ppu::write_vram(self : Ppu, value : UInt32) -> Unit {
       (address - 0x2000U).reinterpret_as_int(),
     )
     self.nt_ram[at] = (value & 0xFF).to_byte()
-  } else {
-    ignore(self.chr_ram)
+  } else if self.chr_ram {
+    // Only a CHR-RAM cartridge accepts writes here. On a CHR-ROM board the
+    // pattern tables are read-only, and silently writing would corrupt the tile
+    // bitmaps that every sprite and background fetch reads back.
     let at = address.reinterpret_as_int()
     let size = self.chr.length()
     self.chr[at % size] = (value & 0xFF).to_byte()
