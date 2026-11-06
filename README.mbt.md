@@ -157,11 +157,12 @@ addressing.mbt   the addressing modes and their page penalties
 ops.mbt          operations: loads, ALU, shifts, compare, branch, jump
 isa.mbt          the opcode table
 cart.mbt         iNES parsing and the cartridge's memories
-mapper.mbt       bank switching: NROM, UxROM, CNROM, MMC1
+mapper.mbt       bank switching: NROM, UxROM, CNROM, MMC1, MMC3, AxROM, GxROM
 ppu.mbt          registers, rendering, sprites, palette and mirroring
 png.mbt          palette to RGB, and a dependency-free PNG writer
 disasm.mbt       the opcode table and its rendering, for trace output
-apu.mbt          the frame counter and channel status registers
+apu.mbt          the frame counter, length counters and status registers
+mixer.mbt        channel oscillators, the nonlinear mixer and the WAV writer
 bus.mbt          the console: address decoding, DMA, controllers
 cmd/main/        the CLI
 ```
