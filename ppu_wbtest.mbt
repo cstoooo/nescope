@@ -474,3 +474,91 @@ test "crossing into the second nametable switches pages" {
   inspect_at("table 0", left, 0x2A)
   inspect_at("table 1", right, 0x16)
 }
+
+///|
+/// Renders a frame through the console rather than the PPU directly, so the test
+/// covers the whole path a program takes: CPU writes to `$2006`/`$2007` land in
+/// the nametable, the mask register turns the layer on, and whole CPU
+/// instructions' worth of PPU dots produce pixels.
+///
+/// Every other rendering test drives `Ppu::tick` itself, which would still pass
+/// if the console never ticked the PPU at all.
+test "a program that enables the background gets pixels on screen" {
+  let out = Buffer::Buffer(size_hint=16 + 0x4000 + 0x2000)
+  out.write_byte(b'N')
+  out.write_byte(b'E')
+  out.write_byte(b'S')
+  out.write_byte(b'\x1A')
+  out.write_byte(b'\x01')
+  out.write_byte(b'\x01')
+  for _ in 0..<10 {
+    out.write_byte(b'\x00')
+  }
+  // The program, starting at $8000: point the PPU at nametable 0, fill the first
+  // tile row with tile 1, set the palette, enable the background, then spin.
+  let code : Array[Int32] = [
+    0xA9, 0x20, 0x8D, 0x06, 0x20, // LDA #$20 / STA $2006: the high byte of
+     0xA9, 0x00, 0x8D, 0x06, 0x20, // nametable 0, then its low byte
+     0xA9, 0x01, 0x8D, 0x07, 0x20, // LDA #1 / STA $2007
+     0xA9, 0x3F, 0x8D, 0x06, 0x20, // LDA #$3F / STA $2006
+     0xA9, 0x00, 0x8D, 0x06, 0x20, // LDA #$00 / STA $2006
+     0xA9, 0x0F, 0x8D, 0x07, 0x20, // LDA #$0F / STA $2007
+     0xA9, 0x2A, 0x8D, 0x07, 0x20, // LDA #$2A / STA $2007
+     0xA9, 0x0A, 0x8D, 0x00, 0x20, // LDA #$0A / STA $2000
+     0xA9, 0x0A, 0x8D, 0x01, 0x20, // LDA #$0A / STA $2001
+     0x4C, 0x2D, 0x80, // JMP $802B, which is the byte after this instruction
+  ]
+  let body = Buffer::Buffer(size_hint=0x4000)
+  for i in 0..<0x4000 {
+    body.write_byte(
+      if i < code.length() {
+        code[i].reinterpret_as_uint().to_byte()
+      } else {
+        b'\xEA'
+      },
+    )
+  }
+  let code_bytes = body.to_bytes()
+  for i in 0..<0x4000 {
+    // The reset vector lives in the last six bytes of the program ROM, which the
+    // console reads through $FFFA-$FFFF. A 16 KiB NROM board mirrors its one chip
+    // into both halves of the map, so $FFFC is offset $3FFC into the chip. Without
+    // this the console boots from whatever filler the ROM happens to end with.
+    let at = i % 0x4000
+    let byte = if at == 0x3FFC {
+      b'\x00'
+    } else if at == 0x3FFD {
+      b'\x80'
+    } else {
+      code_bytes.at(i)
+    }
+    out.write_byte(byte)
+  }
+  for _ in 0..<0x2000 {
+    out.write_byte(b'\x00')
+  }
+  let console = Console::new(Cart::parse(out.to_bytes()))
+  // Tile 1's first row is opaque, so the first eight pixels of the top row are
+  // palette entry 1 rather than the backdrop.
+  for row in 0..<8 {
+    console.ppu.chr[16 + row] = b'\xFF'
+  }
+  // One frame is enough for the program to run its init sequence and for the PPU
+  // to draw with it. Running more would only re-draw the same picture, and a
+  // test that needs several frames to pass is usually hiding a timing bug.
+  ignore(console.run_frame(29780) catch { _ => 0 })
+  inspect_at("enabled", if console.ppu.mask.show_background { 1 } else { 0 }, 1)
+  // The nametable write has to have landed for any of this to mean anything.
+  inspect_at("nametable", console.ppu.nt_ram[0].to_int() & 0xFF, 0x01)
+  // The whole screen is tile 1 with an opaque first row, so the frame has to
+  // contain that palette entry somewhere. Counting across the frame rather than
+  // sampling one pixel means a scroll offset cannot make the test fail for a
+  // reason that is not the renderer's fault.
+  let mut lit = 0
+  for i in 0..<(SCREEN_WIDTH * SCREEN_HEIGHT) {
+    if (console.ppu.frame[i].to_int() & 0xFF) == 0x2A {
+      lit = lit + 1
+    }
+  }
+  inspect_bool(lit > 0, true)
+}
