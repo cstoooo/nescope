@@ -1,13 +1,11 @@
 // The audio processing unit.
 //
-// This build does not synthesize sound. What it does implement is the part a
-// game program can observe, and that part is not optional: the APU also owns the
-// frame counter, which is a CPU-visible timer. A game that waits for the frame
-// IRQ to synchronise its music and its scrolling will wait forever without it,
-// because `$4015` reads as zero and the IRQ never arrives. So the timer is here
-// and is accurate; the four waveform channels have their registers and their
-// length counters enough to make status reads honest, and there is no mixing
-// stage behind them.
+// The APU implements the CPU-visible timer plus the pulse and triangle waveform
+// path. The frame counter is not optional: a game that waits for its IRQ to
+// synchronise music and scrolling will wait forever without it. The four channel
+// registers and length counters keep `$4015` status reads honest, while the
+// mixer combines pulse and triangle output with the hardware's nonlinear curve.
+// Noise, DMC, envelopes and sweep units remain outside this version.
 //
 // The frame counter is a divider from the CPU clock, not from the PPU's. That
 // matters: 29830 CPU cycles per NTSC frame, and the sequence steps four times

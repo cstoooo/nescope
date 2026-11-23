@@ -172,11 +172,15 @@ test "the WAV header describes the samples that follow it" {
     wav.at(28).to_int() | (wav.at(29).to_int() << 8),
     (44100 * 2) & 0xFFFF,
   )
-  // Silence maps to a value near the centre of the signed range rather than to the
-  // bottom, so a WAV player hears a DC offset instead of quiet.
+  // Mixer silence is zero, so the PCM sample must also be zero. Mapping silence
+  // to the bottom of the signed range would produce full-scale negative DC.
   let first_low = wav.at(44).to_int() & 0xFF
   let first_high = wav.at(45).to_int() & 0xFF
-  inspect_eq(first_low | (first_high << 8), 0x8000)
+  inspect_eq(first_low | (first_high << 8), 0x0000)
+  // Full scale maps to the largest positive signed 16-bit value.
+  let last_low = wav.at(48).to_int() & 0xFF
+  let last_high = wav.at(49).to_int() & 0xFF
+  inspect_eq(last_low | (last_high << 8), 0x7FFF)
 }
 
 ///|

@@ -242,3 +242,13 @@ test "the two controller ports are independent" {
   inspect_eq(console.read(0x4016U), 1U)
   inspect_eq(console.read(0x4017U), 0U)
 }
+
+///|
+test "header byte nine supplies the twelve-bit bank counts" {
+  let bytes = Bytes::from_array([
+    b'N', b'E', b'S', b'\x1A', b'\x01', b'\x02', b'\x00', b'\x00', b'\x00', b'\x21',
+    b'\x00', b'\x00', b'\x00', b'\x00', b'\x00', b'\x00',
+  ])
+  inspect_eq(prg_banks_in_16k_units(bytes), 0x101)
+  inspect_eq(chr_banks_in_8k_units(bytes), 0x22)
+}

@@ -11,7 +11,7 @@
 
 name = "cstoooo/nescope"
 
-version = "0.1.0"
+version = "0.1.1"
 
 readme = "README.mbt.md"
 
@@ -23,7 +23,7 @@ keywords = [ "nes", "6502", "emulator", "ppu", "retro" ]
 
 preferred_target = "wasm"
 
-description = "A Nintendo Entertainment System emulator in pure MoonBit: 6502 CPU, PPU, frame-counter APU and the NROM/UxROM/CNROM/MMC1/MMC3/AxROM/GxROM mappers, verified line by line against the nestest golden trace."
+description = "A Nintendo Entertainment System emulator in pure MoonBit: 6502 CPU, PPU, pulse/triangle APU, battery saves, and seven NROM/UxROM/CNROM/MMC1/MMC3/AxROM/GxROM mappers."
 
 import {
   "moonbitlang/x@0.5.7",

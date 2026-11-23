@@ -24,8 +24,7 @@ jobs:
           echo "$HOME/.moon/bin" >> $GITHUB_PATH
 
       - name: Toolchain versions
-        run: |
-          moon version --all
+        run: moon version --all
 
       - name: Update dependencies
         run: moon update
@@ -34,17 +33,18 @@ jobs:
         run: moon fmt --check
 
       - name: Type check with warnings denied
-        run: moon check --deny-warn
+        run: moon check --target all --deny-warn
 
-      - name: Run tests
-        run: moon test
+      - name: Run tests on all supported backends
+        run: moon test --target all --deny-warn
 
       - name: Build the CLI
-        run: moon build cmd/main
+        run: moon build cmd/main --deny-warn
 
-      # Runs the CLI against a real cartridge rather than a synthetic image, so
-      # the smoke test covers header parsing, banking and a whole frame.
-      - name: Smoke-test the CLI on a real ROM
+      - name: Public interface check
         run: |
-          moon run cmd/main -- --inspect internal/fixtures/nestest.nes
-          moon run cmd/main -- --run internal/fixtures/nestest.nes --frames 2
+          moon info
+          git diff --exit-code
+
+      - name: CLI integration tests
+        run: bash scripts/cli-smoke.sh

@@ -262,9 +262,9 @@ pub fn Mixer::run(self : Mixer, cycles : Int64, out : Array[UInt32]) -> Int32 {
 ///|
 /// A mono 16-bit PCM WAV file: a 44-byte header followed by little-endian samples.
 ///
-/// The samples are scaled from the mixer's 0-to-255 range to the signed 16-bit
-/// range and centred on zero, because a WAV player treats silence as zero and an
-/// unsigned 8-bit stream would be heard as a DC offset.
+/// The mixer's silence value is zero, so the encoder maps zero to zero and the
+/// maximum level (255) to 32767. Treating silence as the bottom of the signed
+/// range would create a full-scale negative DC offset in otherwise silent audio.
 pub fn encode_wav(samples : Array[UInt32], rate : UInt32) -> Bytes {
   let out = Buffer::Buffer(size_hint=44 + samples.length() * 2)
   let data_length = samples.length() * 2
@@ -284,10 +284,9 @@ pub fn encode_wav(samples : Array[UInt32], rate : UInt32) -> Bytes {
   write_ascii(out, "data")
   write_le_u32(out, data_length.reinterpret_as_uint())
   for sample in samples {
-    // Centre the unsigned value on zero before scaling: 0 maps to -32768 and 255
-    // to +32768, which is the full range.
-    let centred = sample.reinterpret_as_int() * 257 - 32768
-    write_le_u16(out, (centred & 0xFFFF).reinterpret_as_uint())
+    let bounded = if sample > 255U { 255U } else { sample }
+    let pcm = bounded.reinterpret_as_int() * 32767 / 255
+    write_le_u16(out, pcm.reinterpret_as_uint())
   }
   out.to_bytes()
 }
