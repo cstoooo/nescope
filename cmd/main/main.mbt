@@ -10,8 +10,7 @@
 fn main {
   let args = @env.args()
   if args.length() < 2 {
-    print_usage()
-    return
+    usage_failure()
   }
   match args[1] {
     "--trace" => trace(args)
@@ -19,9 +18,21 @@ fn main {
     "--run" => run_rom(args)
     _ => {
       println("nescope: unknown command \{args[1]}")
-      print_usage()
+      usage_failure()
     }
   }
+}
+
+///|
+fn[T] fail(message : String) -> T {
+  println("nescope: \{message}")
+  @env.exit(1)
+}
+
+///|
+fn[T] usage_failure() -> T {
+  print_usage()
+  @env.exit(2)
 }
 
 ///|
@@ -48,24 +59,19 @@ fn print_usage() -> Unit {
 ///|
 /// Reports what the header of an iNES image says.
 fn inspect(args : Array[String]) -> Unit {
+  match validate_options(args, 3, []) {
+    Some(message) => fail(message)
+    None => ()
+  }
   let path = match option(args, "--inspect") {
     Some(p) => p
-    None => {
-      println("nescope: --inspect needs a file")
-      return
-    }
+    None => fail("--inspect needs a file")
   }
   let bytes = @fs.read_file_to_bytes(path) catch {
-    e => {
-      println("nescope: cannot read \{path}: \{Repr(e)}")
-      return
-    }
+    e => fail("cannot read \{path}: \{Repr(e)}")
   }
   let cart = @lib.Cart::parse(bytes) catch {
-    e => {
-      println("nescope: \{path}: \{e.to_string()}")
-      return
-    }
+    e => fail("\{path}: \{e.to_string()}")
   }
   let prg_bytes = cart.prg.length().to_int64()
   let chr_bytes = cart.chr.length().to_int64()
@@ -93,28 +99,23 @@ fn inspect(args : Array[String]) -> Unit {
 ///|
 /// Boots a ROM and runs whole frames, reporting how far it got.
 fn run_rom(args : Array[String]) -> Unit {
+  match validate_options(args, 3, ["--frames", "--write-png", "--write-wav"]) {
+    Some(message) => fail(message)
+    None => ()
+  }
   let path = match option(args, "--run") {
     Some(p) => p
-    None => {
-      println("nescope: --run needs a file")
-      return
-    }
+    None => fail("--run needs a file")
   }
   let frames = match option(args, "--frames") {
-    Some(text) => parse_decimal(text)
+    Some(text) => parse_decimal_checked(text, "--frames")
     None => 1L
   }
   let bytes = @fs.read_file_to_bytes(path) catch {
-    e => {
-      println("nescope: cannot read \{path}: \{Repr(e)}")
-      return
-    }
+    e => fail("cannot read \{path}: \{Repr(e)}")
   }
   let cart = @lib.Cart::parse(bytes) catch {
-    e => {
-      println("nescope: \{path}: \{e.to_string()}")
-      return
-    }
+    e => fail("\{path}: \{e.to_string()}")
   }
   // A battery-backed cartridges's RAM lives in a file beside the ROM, named the
   // way every other NES emulator names it, so a save made here is the same save
@@ -155,7 +156,7 @@ fn run_rom(args : Array[String]) -> Unit {
   if console.cart.has_battery {
     let data = console.cart.save_data()
     @fs.write_bytes_to_file(save_path, data) catch {
-      e => println("nescope: cannot write \{save_path}: \{Repr(e)}")
+      e => fail("cannot write \{save_path}: \{Repr(e)}")
     }
   }
   match option(args, "--write-wav") {
@@ -165,7 +166,7 @@ fn run_rom(args : Array[String]) -> Unit {
       let samples = console.apu.take_samples()
       let wav = @lib.encode_wav(samples, 44100U)
       @fs.write_bytes_to_file(target, wav) catch {
-        e => println("nescope: cannot write \{target}: \{Repr(e)}")
+        e => fail("cannot write \{target}: \{Repr(e)}")
       }
       println(
         "wrote      \{target} (\{wav.length()} bytes, \{samples.length()} samples)",
@@ -180,37 +181,42 @@ fn run_rom(args : Array[String]) -> Unit {
       // assertion about palette indices.
       let png = @lib.encode_png(console.ppu.frame)
       @fs.write_bytes_to_file(target, png) catch {
-        e => println("nescope: cannot write \{target}: \{Repr(e)}")
+        e => fail("cannot write \{target}: \{Repr(e)}")
       }
       println("wrote      \{target} (\{png.length()} bytes)")
     }
     None => ()
+  }
+  if stopped != "" {
+    @env.exit(1)
   }
 }
 
 ///|
 /// Runs a trace and prints it.
 fn trace(args : Array[String]) -> Unit {
+  match validate_options(args, 3, ["--limit", "--pc"]) {
+    Some(message) => fail(message)
+    None => ()
+  }
   let path = match option(args, "--trace") {
     Some(p) => p
-    None => {
-      println("nescope: --trace needs a file")
-      return
-    }
+    None => fail("--trace needs a file")
   }
   let limit = match option(args, "--limit") {
-    Some(text) => parse_decimal(text)
+    Some(text) => parse_decimal_checked(text, "--limit")
     None => 20L
   }
   let start = match option(args, "--pc") {
-    Some(text) => parse_hex(text)
+    Some(text) =>
+      match parse_hex(text) {
+        Some(value) => value
+        None => fail("--pc expects a hexadecimal address")
+      }
     None => 0xC000U
   }
   let image = @fs.read_file_to_bytes(path) catch {
-    e => {
-      println("nescope: cannot read \{path}: \{Repr(e)}")
-      return
-    }
+    e => fail("cannot read \{path}: \{Repr(e)}")
   }
   // A .nes image is a cartridge, not a flat binary: feeding one to the flat-RAM
   // loader puts the sixteen-byte header where the first instruction should be,
@@ -219,10 +225,7 @@ fn trace(args : Array[String]) -> Unit {
   // also means its banking applies to the operand bytes.
   if is_ines(image) {
     let cart = @lib.Cart::parse(image) catch {
-      e => {
-        println("nescope: \{path}: \{e.to_string()}")
-        return
-      }
+      e => fail("\{path}: \{e.to_string()}")
     }
     let console = @lib.Console::new(cart)
     run_console_trace(console, limit)
@@ -387,26 +390,64 @@ fn option(args : Array[String], flag : String) -> String? {
 }
 
 ///|
-/// Parses a decimal string, returning zero for anything unparseable.
-fn parse_decimal(text : String) -> Int64 {
+/// Rejects unknown, misplaced, or value-less options after `<command> <file>`.
+fn validate_options(
+  args : Array[String],
+  start : Int32,
+  allowed : Array[String],
+) -> String? {
+  let mut i = start
+  while i < args.length() {
+    let option = args[i]
+    let mut known = false
+    for candidate in allowed {
+      if option == candidate {
+        known = true
+      }
+    }
+    if !known {
+      return Some("unknown option \{option}")
+    }
+    if i + 1 >= args.length() {
+      return Some("\{option} requires a value")
+    }
+    i = i + 2
+  }
+  None
+}
+
+///|
+/// Parses a decimal value and terminates with an error when it is malformed.
+fn parse_decimal_checked(text : String, flag : String) -> Int64 {
+  if text.length() == 0 {
+    fail("\{flag} expects a decimal value")
+  }
   let mut value = 0L
   for i in 0..<text.length() {
     let c = text.code_unit_at(i).unsafe_to_char()
     let code = c.to_int()
-    if code >= 48 && code <= 57 {
-      value = value * 10L + (code - 48).to_int64()
-    } else {
-      break
+    if code < 48 || code > 57 {
+      fail("\{flag} expects a decimal value")
     }
+    value = value * 10L + (code - 48).to_int64()
   }
   value
 }
 
 ///|
-/// Parses a `$`-prefixed or bare hex address.
-fn parse_hex(text : String) -> UInt32 {
+/// Parses a `$`-prefixed or bare hex address, returning `None` when malformed.
+fn parse_hex(text : String) -> UInt32? {
+  let start = if text.length() > 0 &&
+    text.code_unit_at(0).unsafe_to_char() == '$' {
+    1
+  } else {
+    0
+  }
+  if start >= text.length() {
+    return None
+  }
   let mut value = 0U
-  for i in 0..<text.length() {
+  for i in start..<text.length() {
     let c = text.code_unit_at(i).unsafe_to_char()
     let code = c.to_int()
     let digit = if code >= 48 && code <= 57 {
@@ -416,11 +457,11 @@ fn parse_hex(text : String) -> UInt32 {
     } else if code >= 65 && code <= 70 {
       code - 55
     } else {
-      continue
+      return None
     }
     value = (value << 4) | digit.reinterpret_as_uint()
   }
-  value
+  Some(value)
 }
 
 ///|

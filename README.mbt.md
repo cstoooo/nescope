@@ -81,11 +81,10 @@ A cartridge whose header sets the battery bit gets a save file beside it:
 last frame, with the same name and format every other emulator uses. A board
 without a battery writes nothing, so a stray `.srm` is never clobbered.
 
-`--trace` still exists for flat binaries: it loads an image at `$C000` and prints
-one line per instruction in the layout `nestest.log` uses. Its `(?)` column is
-the mnemonic, which this build does not disassemble yet. It is left visibly
-empty rather than filled with a guess so that a column that disagrees with a
-reference trace is known to be a state difference and not a formatting one.
+`--trace` accepts either a flat binary or a real cartridge. It prints one line
+per instruction in the layout `nestest.log` uses, including a mnemonic produced
+by the disassembler for every official opcode. Undocumented opcodes whose
+mnemonic has no consensus render as an explicit placeholder rather than a guess.
 
 ## What works today
 
@@ -129,7 +128,7 @@ reference trace is known to be a state difference and not a formatting one.
 
 ## How it is tested
 
-Three kinds of test:
+Four kinds of test:
 
 - **Synthetic.** Each test builds a few bytes of program in flat RAM and pins one
   instruction: the cycle count, the flags set, the address written, or the
@@ -142,6 +141,9 @@ Three kinds of test:
   with `nestest.log` — program counter, accumulator, X, Y, status, stack pointer
   and cumulative cycle count. The log is decimal in its `CYC:` column and hex
   everywhere else, which cost a debugging round to notice.
+- **Integration.** `scripts/cli-smoke.sh` checks header inspection, frame
+  execution, PNG/WAV output, battery save files, trace output and non-zero CLI
+  exits for malformed commands and inputs.
 
 The fixtures in `internal/fixtures` are `nestest.nes` and `nestest.log` from
 [christopherpow/nes-test-roms](https://github.com/christopherpow/nes-test-roms).
